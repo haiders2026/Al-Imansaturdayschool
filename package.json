@@ -1,0 +1,14 @@
+{
+  "name": "al-iman-saturday-school",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Attendance, grades, assignments, WhatsApp groups and payments for Al-Iman Saturday School",
+  "scripts": {
+    "dev": "node scripts/dev-server.mjs",
+    "test": "node scripts/smoke-test.mjs"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}

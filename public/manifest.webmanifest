@@ -1,0 +1,9 @@
+{
+  "name": "Al-Iman Saturday School",
+  "short_name": "Al-Iman",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f5",
+  "theme_color": "#0f6b4f",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
