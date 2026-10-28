@@ -15,7 +15,19 @@ async function call(method, p, body, expect = 200) {
 const ok = (cond, msg) => { if (!cond) throw new Error("FAILED: " + msg); console.log("✓", msg); };
 
 ok((await call("GET", "/setup")).needsSetup, "fresh install needs setup");
-token = (await call("POST", "/setup", { name: "Admin", username: "admin", password: "password123" })).token;
+token = (await call("POST", "/setup", { name: "Admin", username: "admin", email: "Admin@Example.com", password: "password123" })).token;
+await call("POST", "/auth/login", { username: "admin@example.com", password: "password123" });
+ok(true, "admin can sign in with their email");
+await call("POST", "/auth/recover", { code: "x", username: "admin", password: "whatever12" }, 400);
+process.env.ADMIN_RECOVERY_CODE = "correct-horse-battery";
+await call("POST", "/auth/recover", { code: "wrong-code-here", username: "admin", password: "whatever12" }, 401);
+const rec = await call("POST", "/auth/recover", { code: "correct-horse-battery", username: "admin", password: "recovered12" });
+ok(rec.admins.includes("admin"), "recovery code resets the admin password");
+await call("GET", "/auth/me", null, 401);
+token = rec.token;
+await call("POST", "/auth/password", { current: "recovered12", next: "password123" });
+token = (await call("POST", "/auth/login", { username: "admin", password: "password123" })).token;
+delete process.env.ADMIN_RECOVERY_CODE;
 await call("POST", "/setup", { name: "X", username: "x", password: "password123" }, 400);
 ok(true, "setup can't run twice");
 

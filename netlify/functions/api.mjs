@@ -1,6 +1,6 @@
 // All server endpoints live here, under /api/*.
 import { db, all, saveAll, findById, upsert, remove, newId } from "./lib/store.mjs";
-import { hashPassword, checkPassword, signToken, verifyToken, randomPassword } from "./lib/auth.mjs";
+import { hashPassword, checkPassword, signToken, verifyToken, randomPassword, safeEqual } from "./lib/auth.mjs";
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const STATUSES = ["P", "A", "L", "E"]; // present, absent, late, excused
@@ -161,18 +161,37 @@ route("GET", "/setup", async () => {
 
 route("POST", "/setup", async ({ body }) => {
   if ((await all("users")).length) fail(400, "Setup has already been completed.");
-  const { name, username, password, schoolName } = body;
+  const { name, username, password, schoolName, email } = body;
   if (!name || !username || !password || password.length < 8) fail(400, "Name, username and a password of at least 8 characters are required.");
   if (schoolName) await (await db()).setJSON("settings", { ...(await getSettings()), schoolName });
-  const user = await upsert("users", { name, username: username.toLowerCase().trim(), role: "admin", passHash: hashPassword(password), active: true });
+  const user = await upsert("users", { name, email: email || "", username: username.toLowerCase().trim(), role: "admin", passHash: hashPassword(password), active: true });
   return { token: await signToken(user), user: publicUser(user) };
 }, { auth: false });
 
 route("POST", "/auth/login", async ({ body }) => {
   const username = String(body.username || "").toLowerCase().trim();
-  const user = (await all("users")).find((u) => u.username === username);
+  const users = await all("users");
+  // People often type their email instead of their username, so accept either.
+  const user = users.find((u) => u.username === username) || users.find((u) => u.email && u.email.toLowerCase() === username);
   if (!user || user.active === false || !checkPassword(body.password, user.passHash)) fail(401, "Wrong username or password.");
   return { token: await signToken(user), user: publicUser(user) };
+}, { auth: false });
+
+// Locked-out admin: with ADMIN_RECOVERY_CODE set in Netlify's environment variables,
+// the code resets an admin's password (or creates a new admin if the username is new).
+route("POST", "/auth/recover", async ({ body }) => {
+  const code = process.env.ADMIN_RECOVERY_CODE || "";
+  if (code.length < 12) fail(400, "Recovery isn't switched on. Add ADMIN_RECOVERY_CODE (12+ characters) in Netlify's environment variables, then redeploy.");
+  if (!safeEqual(body.code || "", code)) fail(401, "That recovery code is wrong.");
+  const username = String(body.username || "").toLowerCase().trim();
+  if (!username || !body.password || body.password.length < 8) fail(400, "Enter a username and a new password of at least 8 characters.");
+  const users = await all("users");
+  const existing = users.find((u) => u.username === username);
+  if (existing && existing.role !== "admin") fail(400, "That username belongs to a teacher or parent. Pick a different username for the admin.");
+  const saved = await upsert("users", existing
+    ? { id: existing.id, passHash: hashPassword(body.password), active: true, tokenVersion: (existing.tokenVersion || 0) + 1 }
+    : { name: body.name || username, username, role: "admin", passHash: hashPassword(body.password), active: true });
+  return { token: await signToken(saved), user: publicUser(saved), admins: users.filter((u) => u.role === "admin").map((u) => u.username) };
 }, { auth: false });
 
 route("GET", "/auth/me", async ({ user }) => ({ user: publicUser(user), settings: await getSettings() }));

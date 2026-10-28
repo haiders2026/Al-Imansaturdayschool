@@ -57,6 +57,12 @@ export async function verifyToken(token) {
   return data;
 }
 
+export function safeEqual(a, b) {
+  const x = crypto.createHash("sha256").update(String(a)).digest();
+  const y = crypto.createHash("sha256").update(String(b)).digest();
+  return crypto.timingSafeEqual(x, y);
+}
+
 export function randomPassword() {
   const words = ["noor", "sabr", "huda", "salam", "iman", "ilm", "amal", "barak", "rahma", "taqwa"];
   return words[crypto.randomInt(words.length)] + "-" + crypto.randomInt(1000, 9999);

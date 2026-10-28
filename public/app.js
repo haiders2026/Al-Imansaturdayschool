@@ -63,16 +63,41 @@ function renderLogin() {
   app.innerHTML = `<div class="center-screen auth-bg"><form class="auth-card" id="login">
     ${brand()}
     <h2>Sign in</h2>
-    <div class="field"><label for="u">Username or phone</label><input id="u" name="username" autocomplete="username" required></div>
+    <div class="field"><label for="u">Username, email or phone</label><input id="u" name="username" autocomplete="username" required></div>
     <div class="field"><label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required></div>
     <button class="btn" style="width:100%" type="submit">Sign in</button>
     <p class="muted small">Parents: use the phone number and password the school sent you. Forgot it? Ask the school office to reset it.</p>
+    <p class="small"><a href="#" id="recover">Admin locked out?</a></p>
   </form></div>`;
+  document.getElementById("recover").onclick = (e) => { e.preventDefault(); renderRecover(); };
   onSubmit(document.getElementById("login"), async (v) => {
     const res = await api("POST", "/auth/login", v);
     setToken(res.token);
     location.hash = "";
     location.reload();
+  });
+}
+
+function renderRecover() {
+  app.innerHTML = `<div class="center-screen auth-bg"><form class="auth-card" id="rec">
+    ${brand()}
+    <h2>Reset the admin login</h2>
+    <ol class="small muted" style="padding-left:18px">
+      <li>In Netlify, open the site → <strong>Site configuration → Environment variables</strong>.</li>
+      <li>Add <code>ADMIN_RECOVERY_CODE</code> with a secret of 12+ characters only you know.</li>
+      <li>Go to <strong>Deploys → Trigger deploy</strong>, wait a minute, then fill this in.</li>
+    </ol>
+    <div class="field"><label>Recovery code</label><input name="code" type="password" required></div>
+    <div class="field"><label>Admin username (existing, or a new one to create)</label><input name="username" autocapitalize="none" required></div>
+    <div class="field"><label>New password (8+ characters)</label><input name="password" type="password" minlength="8" autocomplete="new-password" required></div>
+    <button class="btn" style="width:100%" type="submit">Reset and sign in</button>
+    <p class="small"><a href="/">Back to sign in</a></p>
+  </form></div>`;
+  onSubmit(document.getElementById("rec"), async (v) => {
+    const res = await api("POST", "/auth/recover", v);
+    setToken(res.token);
+    toast(`Signed in. Admin usernames: ${res.admins.join(", ")}`);
+    setTimeout(() => { location.hash = ""; location.reload(); }, 1500);
   });
 }
 
@@ -83,7 +108,8 @@ function renderSetup() {
     <p class="muted small">Create the first administrator account. You can add teachers and parents after this.</p>
     <div class="field"><label>School name</label><input name="schoolName" value="Al-Iman Saturday School" required></div>
     <div class="field"><label>Your name</label><input name="name" required></div>
-    <div class="field"><label>Username</label><input name="username" autocomplete="username" required></div>
+    <div class="field"><label>Username (you'll type this to sign in)</label><input name="username" autocomplete="username" autocapitalize="none" required></div>
+    <div class="field"><label>Email (you can also sign in with this)</label><input name="email" type="email" autocomplete="email"></div>
     <div class="field"><label>Password (8+ characters)</label><input name="password" type="password" minlength="8" autocomplete="new-password" required></div>
     <button class="btn" style="width:100%" type="submit">Create admin account</button>
   </form></div>`;

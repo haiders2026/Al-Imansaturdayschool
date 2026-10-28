@@ -23,6 +23,8 @@ Other bits: announcements, printable report cards and receipts, attendance regis
 5. Open the site. The first visit asks you to create the admin account.
 6. Go to **Settings & Import → Import students** and load the starter file (`al-iman-starter.json`) you were given, or upload a spreadsheet.
 
+**Locked out of the admin account?** In Netlify, add an environment variable `ADMIN_RECOVERY_CODE` (a secret of 12+ characters), redeploy, then click "Admin locked out?" on the sign-in page. You can sign in with your username or your email.
+
 Data is stored in Netlify Blobs for that site. Download a backup from **Settings & Import → Backup** every few weeks.
 
 ## Running it on your own computer
