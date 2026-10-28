@@ -6,8 +6,8 @@ A web app for running the school: attendance, tests and grades, assignment uploa
 
 | Who | Can do |
 | --- | --- |
-| **Admin** | Everything: students and parents, grades/classes, teacher and parent logins, fees and payments (by family or by student, receipts, WhatsApp reminders), all teacher notes, reports, import, backup |
-| **Teacher** | Their own classes only: take attendance (and message absent students' parents), create tests and enter scores, upload assignments, write notes on students, share to the class WhatsApp group |
+| **Admin** | Everything: students and parents, grades/classes, teacher, assistant and parent logins, fees and payments (by family, by student, and a printable "parents who paid" report), all teacher notes, lesson plan review, reports, import, backup |
+| **Teacher / assistant teacher** | Only the grades they're assigned to (they land on that grade's attendance when they sign in): take attendance (and message absent students' parents), create tests and enter scores, upload assignments, write lesson plans for the admin to review, write notes on students, share to the class WhatsApp group |
 | **Parent** | Their own children only: attendance, grades, assignments to download, teacher comments that were marked "share with parents", fee balance, join-group button for the class WhatsApp |
 
 Other bits: announcements, printable report cards and receipts, attendance register, roster with emergency contacts and allergies, birthdays, CSV exports everywhere, spreadsheet import with column matching, full backup/restore, works on phones (can be added to the home screen).

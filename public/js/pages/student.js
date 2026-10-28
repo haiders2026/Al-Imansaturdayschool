@@ -125,7 +125,7 @@ function reportCard(p) {
     title: "Report card",
     wide: true,
     body: `<div style="border:2px solid var(--green);border-radius:12px;padding:20px">
-      <div style="text-align:center;margin-bottom:12px"><img src="/icon.svg" width="48" alt=""><h2 style="margin:6px 0 0">${esc(state.settings.schoolName)}</h2><div class="muted">Student report · ${esc(state.settings.academicYear || "")} · ${fmtDate(today())}</div></div>
+      <div style="text-align:center;margin-bottom:12px"><img src="/logo.png" width="90" alt="Al-Iman logo"><h2 style="margin:6px 0 0">${esc(state.settings.schoolName)}</h2><div class="muted">Student report · ${esc(state.settings.academicYear || "")} · ${fmtDate(today())}</div></div>
       <dl class="kv"><dt>Student</dt><dd><strong>${esc(studentName(s))}</strong></dd><dt>Class</dt><dd>${esc(p.class?.name || "")}</dd>
         <dt>Attendance</dt><dd>${p.attendance.rate === null ? "–" : p.attendance.rate + "%"} (${p.attendance.counts.P} present, ${p.attendance.counts.L} late, ${p.attendance.counts.A} absent, ${p.attendance.counts.E} excused)</dd>
         <dt>Overall</dt><dd>${p.average === null ? "–" : `${p.average}% — ${letterGrade(p.average)}`}</dd></dl>

@@ -1,15 +1,16 @@
 import { state, api, setToken, logout, loadCommon, esc, toast, onSubmit } from "./js/core.js";
 
 const NAV = [
-  { path: "dashboard", label: "Dashboard", ico: "🏠", roles: ["admin", "teacher", "parent"] },
-  { path: "attendance", label: "Attendance", ico: "✅", roles: ["admin", "teacher"] },
-  { path: "grades", label: "Tests & Grades", ico: "📝", roles: ["admin", "teacher"] },
-  { path: "assignments", label: "Assignments", ico: "📚", roles: ["admin", "teacher", "parent"] },
-  { path: "students", label: "Students", ico: "👧", roles: ["admin", "teacher"] },
-  { path: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", ico: "💬", roles: ["admin", "teacher", "parent"] },
-  { path: "notes", label: "Teacher Notes", ico: "🗒️", roles: ["admin", "teacher"] },
+  { path: "dashboard", label: "Dashboard", ico: "🏠", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "attendance", label: "Attendance", ico: "✅", roles: ["admin", "teacher", "assistant"] },
+  { path: "grades", label: "Tests & Grades", ico: "📝", roles: ["admin", "teacher", "assistant"] },
+  { path: "assignments", label: "Assignments", ico: "📚", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "lessonplans", label: "Lesson Plans", ico: "🗂️", roles: ["admin", "teacher", "assistant"] },
+  { path: "students", label: "Students", ico: "👧", roles: ["admin", "teacher", "assistant"] },
+  { path: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", ico: "💬", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "notes", label: "Teacher Notes", ico: "🗒️", roles: ["admin", "teacher", "assistant"] },
   { path: "payments", label: "Payments", ico: "💳", roles: ["admin"] },
-  { path: "reports", label: "Reports", ico: "📊", roles: ["admin", "teacher"] },
+  { path: "reports", label: "Reports", ico: "📊", roles: ["admin", "teacher", "assistant"] },
   { path: "users", label: "Staff & Logins", ico: "👥", roles: ["admin"] },
   { path: "settings", label: "Settings & Import", ico: "⚙️", roles: ["admin"] },
 ];
@@ -22,6 +23,7 @@ const PAGES = {
   students: () => import("./js/pages/students.js"),
   student: () => import("./js/pages/student.js"),
   classes: () => import("./js/pages/classes.js"),
+  lessonplans: () => import("./js/pages/lessonplans.js"),
   notes: () => import("./js/pages/notes.js"),
   payments: () => import("./js/pages/payments.js"),
   reports: () => import("./js/pages/reports.js"),
@@ -54,7 +56,7 @@ async function boot() {
 }
 
 function brand() {
-  return `<div class="brand"><img src="/icon.svg" alt=""><div>${esc(state.settings.schoolName || "Al-Iman Saturday School")}<small>School manager</small></div></div>`;
+  return `<div class="brand"><img src="/logo.png" alt="Al-Iman logo"><div>${esc(state.settings.schoolName || "Al-Iman Saturday School")}<small>School manager</small></div></div>`;
 }
 
 function renderLogin() {
@@ -69,7 +71,7 @@ function renderLogin() {
   onSubmit(document.getElementById("login"), async (v) => {
     const res = await api("POST", "/auth/login", v);
     setToken(res.token);
-    location.hash = "#/dashboard";
+    location.hash = "";
     location.reload();
   });
 }
@@ -95,7 +97,7 @@ function renderSetup() {
 
 function renderShell() {
   const role = state.user.role;
-  const roleLabel = { admin: "Administrator", teacher: "Teacher", parent: "Parent" }[role];
+  const roleLabel = { admin: "Administrator", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" }[role];
   app.innerHTML = `<div class="shell" id="shell">
     <aside class="sidebar">
       ${brand()}
@@ -117,6 +119,10 @@ function renderShell() {
 }
 
 async function route() {
+  if (!location.hash.replace(/^#\/?/, "") && ["teacher", "assistant"].includes(state.user.role) && state.classes.length) {
+    location.replace("#/attendance");
+    return;
+  }
   const [name = "dashboard", ...params] = location.hash.replace(/^#\/?/, "").split("/");
   const page = document.getElementById("page");
   const navItem = NAV.find((n) => n.path === name);

@@ -32,7 +32,7 @@ export async function render(page, [classIdParam]) {
 
 function item(a, now) {
   const overdue = a.dueDate && a.dueDate < now;
-  const canEdit = isAdmin() || a.createdById === state.user.id || (state.user.role === "teacher" && state.classes.some((c) => c.id === a.classId));
+  const canEdit = isAdmin() || a.createdById === state.user.id || (isStaff() && state.classes.some((c) => c.id === a.classId));
   const shareText = `📚 *New assignment – ${className(a.classId)}*\n${a.title}${a.dueDate ? `\nDue: ${fmtDate(a.dueDate)}` : ""}${a.description ? `\n\n${a.description}` : ""}${a.link ? `\n${a.link}` : ""}\n\nDownload it in the school app: ${location.origin}/#/assignments/${a.classId}`;
   return `<div class="list-item">
     <div class="btn-row" style="justify-content:space-between;align-items:flex-start">

@@ -1,22 +1,23 @@
 import { state, api, esc, studentName, className, toast, emptyState, modal, onSubmit, confirmBox, waChat, download, toCSV } from "../core.js";
 
-const ROLE_LABEL = { admin: "Admin", teacher: "Teacher", parent: "Parent" };
+const ROLE_LABEL = { admin: "Admin", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" };
 
 export async function render(page, [tab = "staff"]) {
   const users = await api("GET", "/users");
   const list = users.filter((u) => (tab === "parents" ? u.role === "parent" : u.role !== "parent")).sort((a, b) => a.name.localeCompare(b.name));
-  const classesOf = (u) => state.classes.filter((c) => (c.teacherIds || []).includes(u.id)).map((c) => c.name).join(", ");
+  const classesOf = (u) => state.classes.filter((c) => [...(c.teacherIds || []), ...(c.assistantIds || [])].includes(u.id))
+    .map((c) => c.name + ((c.assistantIds || []).includes(u.id) ? " (assistant)" : "")).join(", ");
 
   page.innerHTML = `
     <div class="page-head"><div><h1>Staff & logins</h1><div class="muted">Teachers see only their own classes. Parents see only their own children.</div></div>
       <div class="btn-row">${tab === "parents" ? `<button class="btn secondary" id="gen">Create logins for all families</button>` : ""}<button class="btn" id="add">+ Add ${tab === "parents" ? "parent" : "staff"} login</button></div></div>
-    <div class="tabs"><button data-t="staff" class="${tab === "staff" ? "active" : ""}">Admins & teachers</button><button data-t="parents" class="${tab === "parents" ? "active" : ""}">Parents (${users.filter((u) => u.role === "parent").length})</button></div>
+    <div class="tabs"><button data-t="staff" class="${tab === "staff" ? "active" : ""}">Admins, teachers & assistants</button><button data-t="parents" class="${tab === "parents" ? "active" : ""}">Parents (${users.filter((u) => u.role === "parent").length})</button></div>
     <div class="card">${list.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>${tab === "parents" ? "Children" : "Classes"}</th><th>Phone</th><th></th></tr></thead><tbody>
-      ${list.map((u) => `<tr><td><strong>${esc(u.name)}</strong> ${u.active === false ? `<span class="badge red">Disabled</span>` : ""}</td><td>${esc(u.username)}</td><td><span class="badge ${u.role === "admin" ? "amber" : u.role === "teacher" ? "blue" : ""}">${ROLE_LABEL[u.role]}</span></td>
+      ${list.map((u) => `<tr><td><strong>${esc(u.name)}</strong> ${u.active === false ? `<span class="badge red">Disabled</span>` : ""}</td><td>${esc(u.username)}</td><td><span class="badge ${u.role === "admin" ? "amber" : u.role === "parent" ? "" : "blue"}">${ROLE_LABEL[u.role]}</span></td>
         <td class="small">${esc(u.role === "parent" ? (u.studentIds || []).map((id) => studentName(state.students.find((s) => s.id === id))).join(", ") : classesOf(u))}</td>
         <td>${esc(u.phone || "")}</td><td><button class="btn sm secondary" data-edit="${u.id}">Edit</button></td></tr>`).join("")}
     </tbody></table></div>` : emptyState(tab === "parents" ? "No parent logins yet. Use “Create logins for all families” to make one per family phone number." : "No staff yet.")}
-    ${tab === "staff" ? `<p class="muted small">To assign a teacher to a grade, go to <a href="#/classes">Grades & WhatsApp</a> → Edit.</p>` : ""}</div>`;
+    ${tab === "staff" ? `<p class="muted small">To assign a teacher or assistant teacher to a grade, go to <a href="#/classes">Grades & WhatsApp</a> → Edit.</p>` : ""}</div>`;
 
   page.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { location.hash = `#/users/${b.dataset.t}`; });
   page.querySelector("#add").onclick = () => userForm({ role: tab === "parents" ? "parent" : "teacher" });

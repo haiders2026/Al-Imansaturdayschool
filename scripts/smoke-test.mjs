@@ -35,7 +35,8 @@ const cls = classes.find((c) => c.studentCount > 1);
 const kids = students.filter((s) => s.classId === cls.id).sort((a, b) => !!(b.fatherPhone || b.motherPhone) - !!(a.fatherPhone || a.motherPhone));
 
 const t = await call("POST", "/users", { name: "Teacher T", username: "tt", role: "teacher", password: "teacherpass" });
-await call("POST", "/classes", { ...cls, teacherIds: [t.user.id] });
+const asst = await call("POST", "/users", { name: "Assistant A", username: "aa", role: "assistant", password: "assistpass" });
+await call("POST", "/classes", { ...cls, teacherIds: [t.user.id], assistantIds: [asst.user.id] });
 await call("PUT", `/classes/${cls.id}/whatsapp`, { whatsappLink: "not a link" }, 400);
 await call("PUT", `/classes/${cls.id}/whatsapp`, { whatsappLink: "https://chat.whatsapp.com/ABC123" });
 await call("PUT", "/settings", { defaultFee: 300 });
@@ -61,7 +62,25 @@ ok(file.startsWith("%PDF"), "assignment file downloads");
 await call("POST", "/notes", { studentId: kids[0].id, text: "Private note", category: "Behaviour" });
 await call("POST", "/notes", { studentId: kids[0].id, text: "Shared praise", category: "Praise", visibleToParent: true });
 
+const plan = await call("POST", "/lessonplans", { classId: cls.id, weekOf: "2026-11-07", title: "Surah Al-Asr", objectives: "Memorise", status: "submitted",
+  file: { name: "plan.pdf", type: "application/pdf", data: Buffer.from("%PDF plan").toString("base64") } });
+ok(plan.status === "submitted" && plan.authorName === "Teacher T" && plan.file, "teacher submits a lesson plan with a file");
+if (other) await call("POST", "/lessonplans", { classId: other.id, title: "Not mine" }, 403);
+
+token = (await call("POST", "/auth/login", { username: "aa", password: "assistpass" })).token;
+ok((await call("GET", "/classes")).map((c) => c.id).join() === cls.id, "assistant teacher sees only their grade");
+await call("PUT", "/attendance", { classId: cls.id, date: "2026-11-14", records: { [kids[0].id]: "P" } });
+ok(true, "assistant teacher can take attendance for their grade");
+if (other) await call("PUT", "/attendance", { classId: other.id, date: "2026-11-14", records: {} }, 403);
+ok((await call("GET", "/lessonplans")).length === 1, "assistant sees the grade's lesson plans");
+await call("GET", "/payments/summary", null, 403);
+await call("POST", `/lessonplans/${plan.id}/review`, { status: "approved" }, 403);
+ok(true, "assistant can't see payments or approve plans");
+
 token = adminToken;
+const reviewed = await call("POST", `/lessonplans/${plan.id}/review`, { status: "changes", feedback: "Add a homework task" });
+ok(reviewed.status === "changes" && reviewed.feedback, "admin sends a plan back with feedback");
+ok((await call("GET", `/lessonplans/${plan.id}/file`)).startsWith("%PDF"), "lesson plan file downloads");
 const { created } = await call("POST", "/users/parents/generate", {});
 ok(created.length > 0, `${created.length} parent logins generated`);
 const fam = created.find((c) => c.studentIds.includes(kids[0].id));
@@ -80,7 +99,8 @@ await call("GET", `/students/${stranger.id}/profile`, null, 404);
 ok(true, "parent can't open another child");
 await call("GET", "/payments", null, 403);
 await call("POST", "/notes", { studentId: kids[0].id, text: "x" }, 403);
-ok(true, "parent can't see payment ledger or write notes");
+await call("GET", "/lessonplans", null, 403);
+ok(true, "parent can't see payment ledger, lesson plans or write notes");
 ok((await call("GET", "/assignments")).some((x) => x.id === a.id), "parent sees class assignments");
 
 token = adminToken;

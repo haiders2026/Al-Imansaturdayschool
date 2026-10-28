@@ -11,7 +11,7 @@ export async function render(page) {
       <div class="btn-row">${isStaff() ? `<button class="btn secondary" id="how">How to get an invite link</button>` : ""}${isAdmin() ? `<button class="btn" id="add">+ Add grade/class</button>` : ""}</div></div>
     ${classes.length ? `<div class="grid cols-3">${classes.map((c) => `<div class="card">
       <div class="btn-row" style="justify-content:space-between"><h2 style="margin:0">${esc(c.name)}</h2>${c.whatsappLink ? `<span class="badge green">Group linked</span>` : isStaff() ? `<span class="badge amber">No group yet</span>` : ""}</div>
-      ${isStaff() ? `<p class="muted small" style="margin:.5rem 0">${c.studentCount} students · ${esc((c.teacherIds || []).map(tName).filter(Boolean).join(", ") || "No teacher assigned")}${c.room ? ` · Room ${esc(c.room)}` : ""}${isAdmin() && c.fee ? ` · Fee ${fmtMoney(c.fee)}` : ""}</p>` : ""}
+      ${isStaff() ? `<p class="muted small" style="margin:.5rem 0">${c.studentCount} students · ${esc((c.teacherIds || []).map(tName).filter(Boolean).join(", ") || "No teacher assigned")}${(c.assistantIds || []).length ? ` · Assistant: ${esc(c.assistantIds.map(tName).filter(Boolean).join(", "))}` : ""}${c.room ? ` · Room ${esc(c.room)}` : ""}${isAdmin() && c.fee ? ` · Fee ${fmtMoney(c.fee)}` : ""}</p>` : ""}
       <div class="btn-row">
         ${c.whatsappLink ? `<a class="btn sm wa" href="${esc(c.whatsappLink)}" target="_blank" rel="noopener">${isParent() ? "Join group" : "Open group"}</a>` : ""}
         ${isStaff() && c.whatsappLink ? `<button class="btn sm secondary" data-invite="${c.id}">Invite parents</button><a class="btn sm secondary" href="${waShare("")}" target="_blank" rel="noopener">Post to group</a>` : ""}
@@ -89,14 +89,19 @@ function classForm(c, teachers) {
       <div class="field"><label>Sort order</label><input type="number" name="order" value="${c.order ?? ""}"></div>
       <div class="field"><label>Room</label><input name="room" value="${esc(c.room || "")}"></div>
       <div class="field"><label>Yearly fee per student (${esc(state.settings.currency || "$")})</label><input type="number" step="0.01" name="fee" value="${c.fee ?? ""}" placeholder="uses school default"></div></div>
-      <div class="field"><label>Teachers (hold Ctrl/⌘ to choose several)</label><select name="teacherIds" multiple size="${Math.min(Math.max(teachers.length, 2), 8)}">
-        ${teachers.map((t) => `<option value="${t.id}" ${(c.teacherIds || []).includes(t.id) ? "selected" : ""}>${esc(t.name)}${t.role === "admin" ? " (admin)" : ""}</option>`).join("")}</select>
-        ${teachers.length ? "" : `<p class="muted small">Add teacher logins in Staff & Logins first.</p>`}</div>
+      <fieldset><legend>Who teaches this grade?</legend>
+        ${teachers.length ? `<table><thead><tr><th>Staff</th><th>Teacher</th><th>Assistant</th></tr></thead><tbody>
+          ${teachers.map((t) => `<tr><td>${esc(t.name)} <span class="muted small">${t.role === "admin" ? "admin" : t.role === "assistant" ? "assistant teacher" : ""}</span></td>
+            <td><input type="checkbox" data-staff="teacherIds" value="${t.id}" ${(c.teacherIds || []).includes(t.id) ? "checked" : ""} aria-label="${esc(t.name)} as teacher"></td>
+            <td><input type="checkbox" data-staff="assistantIds" value="${t.id}" ${(c.assistantIds || []).includes(t.id) ? "checked" : ""} aria-label="${esc(t.name)} as assistant"></td></tr>`).join("")}
+        </tbody></table>` : `<p class="muted small">Add teacher logins in Staff & Logins first.</p>`}
+        <p class="muted small">Both see this grade when they sign in and can take attendance, enter grades, upload assignments and write lesson plans.</p></fieldset>
       <div class="field"><label>WhatsApp group invite link</label><input name="whatsappLink" value="${esc(c.whatsappLink || "")}" placeholder="https://chat.whatsapp.com/..."></div>
       <div class="modal-foot">${c.id ? `<button type="button" class="btn danger" id="del" style="margin-right:auto">Delete</button>` : ""}<button type="button" class="btn secondary" data-close>Cancel</button><button class="btn" type="submit">Save</button></div></form>`,
   });
   onSubmit(el.querySelector("form"), async (v) => {
-    await api("POST", "/classes", { ...v, id: c.id, order: v.order === "" ? undefined : Number(v.order), fee: v.fee === "" ? null : Number(v.fee) });
+    const picked = (key) => [...el.querySelectorAll(`[data-staff=${key}]:checked`)].map((x) => x.value);
+    await api("POST", "/classes", { ...v, id: c.id, teacherIds: picked("teacherIds"), assistantIds: picked("assistantIds"), order: v.order === "" ? undefined : Number(v.order), fee: v.fee === "" ? null : Number(v.fee) });
     await loadCommon();
     toast("Saved");
     close();
