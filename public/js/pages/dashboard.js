@@ -2,7 +2,8 @@ import { state, api, esc, fmtDate, fmtMoney, isAdmin, isParent, isStaff, student
 
 export async function render(page) {
   const [dash, announcements] = await Promise.all([api("GET", "/dashboard"), api("GET", "/announcements")]);
-  const hello = `As-salamu alaykum, ${esc(state.user.name.split(" ")[0])}`;
+  const firstName = state.user.name.replace(/^(br|sr|sis|bro|dr|mr|mrs|ms|sheikh|shaykh|maulana|syed|sayed)\.?\s+/i, "").split(" ")[0];
+  const hello = `As-salamu alaykum, ${esc(firstName)}`;
 
   let top = "";
   if (isAdmin()) {

@@ -23,6 +23,9 @@ const DEFAULT_SETTINGS = {
   countryCode: "1",
 };
 
+// Fee settings are office business; everyone else gets the rest.
+const settingsFor = (user, settings) => (user.role === "admin" ? settings : stripFields(settings, ["defaultFee"]));
+
 async function getSettings() {
   return { ...DEFAULT_SETTINGS, ...((await (await db()).getJSON("settings")) || {}) };
 }
@@ -194,7 +197,7 @@ route("POST", "/auth/recover", async ({ body }) => {
   return { token: await signToken(saved), user: publicUser(saved), admins: users.filter((u) => u.role === "admin").map((u) => u.username) };
 }, { auth: false });
 
-route("GET", "/auth/me", async ({ user }) => ({ user: publicUser(user), settings: await getSettings() }));
+route("GET", "/auth/me", async ({ user }) => ({ user: publicUser(user), settings: settingsFor(user, await getSettings()) }));
 
 route("POST", "/auth/password", async ({ user, body }) => {
   if (!checkPassword(body.current, user.passHash)) fail(400, "Your current password is wrong.");
@@ -205,7 +208,7 @@ route("POST", "/auth/password", async ({ user, body }) => {
 });
 
 // Settings
-route("GET", "/settings", async () => getSettings());
+route("GET", "/settings", async ({ user }) => settingsFor(user, await getSettings()));
 route("PUT", "/settings", async ({ user, body }) => {
   requireRole(user, "admin");
   const next = { ...(await getSettings()), ...pick(body, Object.keys(DEFAULT_SETTINGS)) };
@@ -218,7 +221,13 @@ route("GET", "/users", async ({ user }) => {
   requireRole(user, "admin");
   return (await all("users")).map(publicUser);
 });
-route("GET", "/teachers", async () => (await all("users")).filter((u) => u.role !== "parent" && u.active !== false).map((u) => ({ id: u.id, name: u.name, role: u.role, phone: u.phone || "" })));
+// Admins see all staff; teachers only see who else teaches their own grades.
+route("GET", "/teachers", async ({ user }) => {
+  const staff = (await all("users")).filter((u) => u.role !== "parent" && u.active !== false);
+  if (user.role === "admin") return staff.map((u) => ({ id: u.id, name: u.name, role: u.role, phone: u.phone || "" }));
+  const colleagues = new Set((await visibleClasses(user)).flatMap(staffOf));
+  return staff.filter((u) => colleagues.has(u.id)).map((u) => ({ id: u.id, name: u.name, role: u.role }));
+});
 route("POST", "/users", async ({ user, body }) => {
   requireRole(user, "admin");
   const username = String(body.username || "").toLowerCase().trim();

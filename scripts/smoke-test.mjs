@@ -81,6 +81,9 @@ if (other) await call("POST", "/lessonplans", { classId: other.id, title: "Not m
 
 token = (await call("POST", "/auth/login", { username: "aa", password: "assistpass" })).token;
 ok((await call("GET", "/classes")).map((c) => c.id).join() === cls.id, "assistant teacher sees only their grade");
+const colleagues = (await call("GET", "/teachers")).map((u) => u.name).sort().join();
+ok(colleagues === "Assistant A,Teacher T", "assistant sees only their grade's staff");
+ok((await call("GET", "/settings")).defaultFee === undefined, "assistant doesn't see fee settings");
 await call("PUT", "/attendance", { classId: cls.id, date: "2026-11-14", records: { [kids[0].id]: "P" } });
 ok(true, "assistant teacher can take attendance for their grade");
 if (other) await call("PUT", "/attendance", { classId: other.id, date: "2026-11-14", records: {} }, 403);
