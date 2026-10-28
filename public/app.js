@@ -2,6 +2,7 @@ import { state, api, setToken, logout, loadCommon, esc, toast, onSubmit } from "
 
 const NAV = [
   { path: "dashboard", label: "Dashboard", ico: "🏠", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "calendar", label: "Calendar", ico: "📅", roles: ["admin", "teacher", "assistant", "parent"] },
   { path: "attendance", label: "Attendance", ico: "✅", roles: ["admin", "teacher", "assistant"] },
   { path: "grades", label: "Tests & Grades", ico: "📝", roles: ["admin", "teacher", "assistant"] },
   { path: "assignments", label: "Assignments", ico: "📚", roles: ["admin", "teacher", "assistant", "parent"] },
@@ -9,6 +10,7 @@ const NAV = [
   { path: "students", label: "Students", ico: "👧", roles: ["admin", "teacher", "assistant"] },
   { path: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", teacherLabel: "My class & WhatsApp", ico: "💬", roles: ["admin", "teacher", "assistant", "parent"] },
   { path: "notes", label: "Teacher Notes", ico: "🗒️", roles: ["admin", "teacher", "assistant"] },
+  { path: "registrations", label: "Registrations", ico: "✍️", roles: ["admin"] },
   { path: "payments", label: "Payments", ico: "💳", roles: ["admin"] },
   { path: "reports", label: "Reports", ico: "📊", roles: ["admin", "teacher", "assistant"] },
   { path: "users", label: "Staff & Logins", ico: "👥", roles: ["admin"] },
@@ -17,6 +19,8 @@ const NAV = [
 
 const PAGES = {
   dashboard: () => import("./js/pages/dashboard.js"),
+  calendar: () => import("./js/pages/calendar.js"),
+  registrations: () => import("./js/pages/registrations.js"),
   attendance: () => import("./js/pages/attendance.js"),
   grades: () => import("./js/pages/grades.js"),
   assignments: () => import("./js/pages/assignments.js"),
@@ -35,6 +39,16 @@ const PAGES = {
 const app = document.getElementById("app");
 
 async function boot() {
+  // The registration form is public: families open /register without signing in.
+  if (location.pathname.replace(/\/$/, "") === "/register" || /^#\/register\/?$/.test(location.hash)) {
+    try {
+      const { renderPublic } = await import("./js/pages/register.js");
+      await renderPublic(app);
+    } catch (err) {
+      app.innerHTML = `<div class="center-screen"><div class="auth-card"><h2>Can't load the form</h2><p class="muted">${esc(err.message)}</p><button class="btn" onclick="location.reload()">Try again</button></div></div>`;
+    }
+    return;
+  }
   try {
     if (state.token) {
       const me = await api("GET", "/auth/me");
@@ -67,6 +81,7 @@ function renderLogin() {
     <div class="field"><label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required></div>
     <button class="btn" style="width:100%" type="submit">Sign in</button>
     <p class="muted small">Parents: use the phone number and password the school sent you. Forgot it? Ask the school office to reset it.</p>
+    <p class="small"><a href="/register"><strong>New or returning family? Register here</strong></a></p>
     <p class="small"><a href="#" id="recover">Admin locked out?</a></p>
   </form></div>`;
   document.getElementById("recover").onclick = (e) => { e.preventDefault(); renderRecover(); };

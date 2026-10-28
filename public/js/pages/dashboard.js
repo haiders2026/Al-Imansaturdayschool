@@ -1,7 +1,12 @@
 import { state, api, esc, fmtDate, fmtMoney, isAdmin, isParent, isStaff, studentName, className, classOptions, modal, onSubmit, toast, confirmBox, emptyState, waShare } from "../core.js";
+import { upcomingEvents, eventRow, wireEvents, whenText } from "./calendar.js";
 
 export async function render(page) {
-  const [dash, announcements] = await Promise.all([api("GET", "/dashboard"), api("GET", "/announcements")]);
+  const [dash, announcements, events] = await Promise.all([api("GET", "/dashboard"), api("GET", "/announcements"), api("GET", "/events")]);
+  const upcoming = upcomingEvents(events);
+  // Warn about a day off in the next two weeks, so nobody turns up to a closed school.
+  const soon = new Date(Date.now() + 14 * 864e5).toISOString().slice(0, 10);
+  const closed = upcoming.find((e) => e.type === "noschool" && e.date <= soon);
   const firstName = state.user.name.replace(/^(br|sr|sis|bro|dr|mr|mrs|ms|sheikh|shaykh|maulana|syed|sayed)\.?\s+/i, "").split(" ")[0];
   const hello = `As-salamu alaykum, ${esc(firstName)}`;
 
@@ -14,6 +19,7 @@ export async function render(page) {
       ${dash.lastDay ? stat("Last attendance", `${dash.lastDay.present} present`, `${dash.lastDay.absent} absent · ${fmtDate(dash.lastDay.date)}`) : stat("Last attendance", "None yet", "")}
       ${stat("Fees collected", fmtMoney(f.paid), `of ${fmtMoney(f.fee)} expected`)}
       ${stat("Outstanding", fmtMoney(f.balance), `${f.unpaidCount} students owe`)}
+      ${dash.registrationsWaiting ? `<a href="#/registrations" style="text-decoration:none;color:inherit">${stat("Registrations", `${dash.registrationsWaiting} new`, "to review")}</a>` : ""}
       ${dash.plansWaiting ? `<a href="#/lessonplans" style="text-decoration:none;color:inherit">${stat("Lesson plans", `${dash.plansWaiting} to review`, "from teachers")}</a>` : ""}
     </div>
     ${setupWarnings(dash)}`;
@@ -30,13 +36,16 @@ export async function render(page) {
   page.innerHTML = `
     <div class="page-head"><div><h1>${hello}</h1><div class="muted">${fmtDate(new Date().toISOString())}</div></div>
       ${isStaff() ? `<button class="btn" id="new-ann">+ Announcement</button>` : ""}</div>
+    ${closed ? `<div class="banner red">🚫 No school: ${esc(closed.title)} · ${esc(whenText(closed))}${closed.classId ? ` (${esc(className(closed.classId))})` : ""}</div>` : ""}
     ${top}
     <div class="grid cols-2">
       <div class="card"><h2>Announcements</h2>${announcements.length ? announcements.slice(0, 8).map(annItem).join("") : emptyState("No announcements yet.")}</div>
       <div class="card"><h2>Upcoming assignments</h2>${dash.upcoming.length ? dash.upcoming.map((a) => `
         <div class="list-item"><strong>${esc(a.title)}</strong> <span class="badge">${esc(className(a.classId))}</span>
         <div class="meta">Due ${fmtDate(a.dueDate)}</div></div>`).join("") + `<p><a href="#/assignments">All assignments →</a></p>` : emptyState("Nothing due.")}</div>
+      <div class="card"><h2>Coming up</h2>${upcoming.length ? upcoming.slice(0, 5).map(eventRow).join("") : emptyState("Nothing on the calendar yet.")}<p><a href="#/calendar">School calendar →</a></p></div>
     </div>`;
+  wireEvents(page, events);
 
   page.querySelector("#new-ann")?.addEventListener("click", newAnnouncement);
   page.querySelectorAll("[data-del-ann]").forEach((b) => b.onclick = async () => {
@@ -60,7 +69,8 @@ function setupWarnings(dash) {
 function annItem(a) {
   const canDelete = isAdmin() || a.authorId === state.user.id;
   return `<div class="list-item"><div class="btn-row" style="justify-content:space-between"><strong>${esc(a.title)}</strong>
-    ${canDelete ? `<button class="btn link small" data-del-ann="${a.id}">Delete</button>` : ""}</div>
+    <span class="btn-row">${isStaff() ? `<a class="btn link small" target="_blank" rel="noopener" href="${esc(waShare(`📢 *${a.title}*\n${a.body || ""}\n\n— ${state.settings.schoolName}`))}">Share on WhatsApp</a>` : ""}
+    ${canDelete ? `<button class="btn link small" data-del-ann="${a.id}">Delete</button>` : ""}</span></div>
     ${a.body ? `<div class="note-text">${esc(a.body)}</div>` : ""}
     <div class="meta">${esc(a.authorName)} · ${fmtDate(a.createdAt)} · ${a.classId ? esc(className(a.classId)) : "Whole school"}</div></div>`;
 }
