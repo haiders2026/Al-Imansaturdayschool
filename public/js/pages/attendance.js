@@ -6,15 +6,18 @@ export async function render(page, [classIdParam, dateParam]) {
   const date = dateParam || lastSaturday();
   rememberClass(classId);
   const students = state.students.filter((s) => s.classId === classId && s.active !== false).sort((a, b) => studentName(a).localeCompare(studentName(b)));
-  const saved = await api("GET", `/attendance?classId=${classId}&date=${date}`);
+  const [saved, staff] = await Promise.all([api("GET", `/attendance?classId=${classId}&date=${date}`), api("GET", "/teachers")]);
+  const cls = state.classes.find((c) => c.id === classId) || {};
+  const names = (ids) => (ids || []).map((id) => staff.find((t) => t.id === id)?.name).filter(Boolean).join(", ");
+  const staffLine = [names(cls.teacherIds) && `Teacher: ${names(cls.teacherIds)}`, names(cls.assistantIds) && `Assistant: ${names(cls.assistantIds)}`].filter(Boolean).join(" · ");
   const isNew = !Object.keys(saved.records).length;
   const records = { ...saved.records };
 
   page.innerHTML = `
-    <div class="page-head"><div><h1>Attendance</h1><div class="muted" id="status">${isNew ? "Not taken yet for this day" : `Last saved by ${esc(saved.takenBy)} · you can still make changes`}</div></div></div>
+    <div class="page-head"><div><h1>Attendance · ${esc(cls.name || "")}</h1>${staffLine ? `<div class="small">${esc(staffLine)}</div>` : ""}<div class="muted" id="status">${isNew ? "Not taken yet for this day" : `Last saved by ${esc(saved.takenBy)} · you can still make changes`}</div></div></div>
     <div class="card">
       <div class="toolbar">
-        <div class="field"><label>Class</label><select id="cls">${classOptions(classId)}</select></div>
+        <div class="field"${state.classes.length === 1 ? ' style="display:none"' : ""}><label>Class</label><select id="cls">${classOptions(classId)}</select></div>
         <div class="field"><label>Date</label><input type="date" id="date" value="${date}"></div>
         <button class="btn secondary" id="all-present">Mark all present</button>
         <div id="counts" class="muted" style="margin-left:auto"></div>

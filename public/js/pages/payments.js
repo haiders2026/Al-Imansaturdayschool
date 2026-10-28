@@ -16,7 +16,7 @@ export async function render(page, [view = "families"]) {
       <div class="stat"><div class="label">Outstanding</div><div class="value" style="color:var(--red)">${fmtMoney(t.balance)}</div><div class="sub">${summary.rows.filter((r) => r.balance > 0).length} students</div></div>
       <div class="stat"><div class="label">This month</div><div class="value">${fmtMoney(collectedThisMonth)}</div></div>
     </div>
-    <div class="tabs"><button data-view="families">By family</button><button data-view="balances">By student</button><button data-view="history">Payment history</button></div>
+    <div class="tabs"><button data-view="families">By family</button><button data-view="balances">By student</button><button data-view="history">Payment history</button><button data-view="report">Parents who paid (report)</button></div>
     <div class="card" id="body"></div>`;
 
   page.querySelectorAll("[data-view]").forEach((b) => {
@@ -26,6 +26,7 @@ export async function render(page, [view = "families"]) {
   page.querySelector("#pay").onclick = () => paymentForm();
   const body = page.querySelector("#body");
   if (view === "history") drawHistory(body, payments, page);
+  else if (view === "report") drawPaidReport(body, payments, page);
   else if (view === "families") drawFamilies(body, summary.rows, page);
   else drawBalances(body, summary.rows, page);
 }
@@ -103,6 +104,54 @@ function drawFamilies(body, rows, page) {
   ]));
 }
 
+// Printable list of every family that has paid: parents, children, each payment and the total.
+function drawPaidReport(body, payments, page) {
+  let from = "", to = "";
+  body.innerHTML = `<div class="toolbar no-print">
+      <div class="field"><label>From</label><input type="date" id="from"></div>
+      <div class="field"><label>To</label><input type="date" id="to"></div>
+      <button class="btn secondary" id="print">Print</button></div>
+    <div class="print-only"><h2>${esc(state.settings.schoolName)} — Payments received by parent</h2></div>
+    <div id="t"></div>`;
+  const families = () => {
+    const fams = new Map();
+    payments.filter((p) => (!from || p.date >= from) && (!to || p.date <= to)).forEach((p) => {
+      const s = studentById(p.studentId);
+      if (!s) return;
+      const k = familyKey(s);
+      if (!fams.has(k)) {
+        const siblings = state.students.filter((x) => familyKey(x) === k && x.active !== false);
+        fams.set(k, { father: s.fatherName, mother: s.motherName, guardian: s.guardianName, phone: parentPhone(s), kids: siblings.length ? siblings : [s], payments: [], total: 0 });
+      }
+      const f = fams.get(k);
+      f.payments.push(p);
+      f.total += Number(p.amount || 0);
+    });
+    return [...fams.values()].sort((a, b) => (a.father || a.mother || "").localeCompare(b.father || b.mother || ""));
+  };
+  const parents = (f) => [f.father && `${f.father} (father)`, f.mother && `${f.mother} (mother)`, f.guardian && `${f.guardian} (guardian)`].filter(Boolean);
+  const draw = () => {
+    const l = families();
+    const total = l.reduce((sum, f) => sum + f.total, 0);
+    body.querySelector("#t").innerHTML = l.length ? `<p><strong>${l.length}</strong> families paid a total of <strong>${fmtMoney(total)}</strong>${from || to ? ` between ${from ? fmtDate(from) : "the start"} and ${to ? fmtDate(to) : "today"}` : ""}.</p>
+      <div class="table-wrap"><table><thead><tr><th>#</th><th>Parents</th><th>Phone</th><th>Children</th><th>Payments</th><th class="num">Total paid</th></tr></thead><tbody>
+      ${l.map((f, i) => `<tr style="vertical-align:top"><td>${i + 1}</td><td>${parents(f).map(esc).join("<br>") || "—"}</td><td>${esc(f.phone)}</td>
+        <td>${f.kids.map((k) => `${esc(studentName(k))} <span class="muted small">${esc(className(k.classId))}</span>`).join("<br>")}</td>
+        <td class="small">${f.payments.sort((a, b) => a.date.localeCompare(b.date)).map((p) => `${fmtDate(p.date)} · ${fmtMoney(p.amount)}${p.method ? ` · ${esc(p.method)}` : ""}`).join("<br>")}</td>
+        <td class="num"><strong>${fmtMoney(f.total)}</strong></td></tr>`).join("")}
+      <tr><td colspan="5"><strong>Total</strong></td><td class="num"><strong>${fmtMoney(total)}</strong></td></tr></tbody></table></div>` : emptyState("No payments in this period.");
+  };
+  draw();
+  body.querySelector("#from").onchange = (e) => { from = e.target.value; draw(); };
+  body.querySelector("#to").onchange = (e) => { to = e.target.value; draw(); };
+  body.querySelector("#print").onclick = () => print();
+  page.querySelector("#export").onclick = () => download("payments-by-parent.csv", toCSV([
+    ["Father", "Mother", "Guardian", "Phone", "Children", "Classes", "Number of payments", "Payment dates and amounts", "Total paid"],
+    ...families().map((f) => [f.father, f.mother, f.guardian, f.phone, f.kids.map(studentName).join("; "), f.kids.map((k) => className(k.classId)).join("; "), f.payments.length,
+      f.payments.map((p) => `${p.date} ${p.amount}`).join("; "), f.total]),
+  ]));
+}
+
 function drawHistory(body, payments, page) {
   body.innerHTML = payments.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Receipt</th><th>Student</th><th class="num">Amount</th><th>Method</th><th>Reference / note</th><th>By</th><th></th></tr></thead><tbody>
     ${payments.map((p) => `<tr><td>${fmtDate(p.date)}</td><td>${esc(p.receiptNo || "")}</td><td>${esc(studentName(studentById(p.studentId)))}</td><td class="num">${fmtMoney(p.amount)}</td>
@@ -152,7 +201,7 @@ export function showReceipt(p, s, refreshOnClose = false) {
   const { el, close } = modal({
     title: "Receipt",
     body: `<div style="border:1px dashed #9bb;padding:20px;border-radius:10px">
-      <div style="text-align:center"><img src="/icon.svg" width="40" alt=""><h2 style="margin:6px 0 0">${esc(state.settings.schoolName)}</h2><div class="muted">Payment receipt</div></div>
+      <div style="text-align:center"><img src="/logo.png" width="80" alt="Al-Iman logo"><h2 style="margin:6px 0 0">${esc(state.settings.schoolName)}</h2><div class="muted">Payment receipt</div></div>
       <dl class="kv" style="margin-top:16px"><dt>Receipt #</dt><dd>${esc(p.receiptNo || "")}</dd><dt>Date</dt><dd>${fmtDate(p.date)}</dd>
       <dt>Student</dt><dd>${esc(studentName(s))} (${esc(className(s?.classId))})</dd><dt>Received from</dt><dd>${esc(parentName(s))}</dd>
       <dt>Amount</dt><dd><strong style="font-size:1.2rem">${fmtMoney(p.amount)}</strong></dd><dt>Method</dt><dd>${esc(p.method || "")}${p.reference ? ` · ${esc(p.reference)}` : ""}</dd>

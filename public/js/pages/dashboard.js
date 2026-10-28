@@ -13,6 +13,7 @@ export async function render(page) {
       ${dash.lastDay ? stat("Last attendance", `${dash.lastDay.present} present`, `${dash.lastDay.absent} absent · ${fmtDate(dash.lastDay.date)}`) : stat("Last attendance", "None yet", "")}
       ${stat("Fees collected", fmtMoney(f.paid), `of ${fmtMoney(f.fee)} expected`)}
       ${stat("Outstanding", fmtMoney(f.balance), `${f.unpaidCount} students owe`)}
+      ${dash.plansWaiting ? `<a href="#/lessonplans" style="text-decoration:none;color:inherit">${stat("Lesson plans", `${dash.plansWaiting} to review`, "from teachers")}</a>` : ""}
     </div>
     ${setupWarnings(dash)}`;
   } else if (isParent()) {

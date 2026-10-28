@@ -35,7 +35,7 @@ h3 { font-size: 1rem; margin: 0 0 .5rem; }
 .shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
 .sidebar { background: var(--green-dark); color: #fff; padding: 18px 12px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .brand { display: flex; gap: 10px; align-items: center; padding: 4px 8px 18px; font-weight: 700; }
-.brand img { width: 34px; height: 34px; }
+.brand img { width: 44px; height: 44px; border-radius: 8px; background: #fff; object-fit: contain; }
 .brand small { display: block; font-weight: 400; opacity: .75; font-size: .75rem; }
 .nav a { display: flex; gap: 10px; align-items: center; color: #dfeee7; text-decoration: none; padding: 9px 10px; border-radius: 8px; margin-bottom: 2px; }
 .nav a:hover { background: rgba(255,255,255,.08); }

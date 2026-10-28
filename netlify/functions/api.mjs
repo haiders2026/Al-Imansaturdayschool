@@ -1,6 +1,6 @@
 // All server endpoints live here, under /api/*.
 import { db, all, saveAll, findById, upsert, remove, newId } from "./lib/store.mjs";
-import { hashPassword, checkPassword, signToken, verifyToken, randomPassword } from "./lib/auth.mjs";
+import { hashPassword, checkPassword, signToken, verifyToken, randomPassword, safeEqual } from "./lib/auth.mjs";
 
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const STATUSES = ["P", "A", "L", "E"]; // present, absent, late, excused
@@ -40,19 +40,25 @@ const STUDENT_FIELDS = [
 ];
 const FEE_FIELDS = ["fee", "adminNote"];
 
+// Teachers and assistant teachers work the same way, limited to the grades they're assigned to.
+const TEACHING = ["teacher", "assistant"];
+const isTeaching = (user) => TEACHING.includes(user.role);
+const staffOf = (cls) => [...(cls.teacherIds || []), ...(cls.assistantIds || [])];
+
 function requireRole(user, ...roles) {
+  if (roles.includes("teacher")) roles.push("assistant");
   if (!roles.includes(user.role)) fail(403, "You don't have access to this.");
 }
 
 async function teacherClassIds(user) {
   const classes = await all("classes");
-  return classes.filter((c) => (c.teacherIds || []).includes(user.id)).map((c) => c.id);
+  return classes.filter((c) => staffOf(c).includes(user.id)).map((c) => c.id);
 }
 
 async function visibleStudents(user) {
   const students = await all("students");
   if (user.role === "admin") return students;
-  if (user.role === "teacher") {
+  if (isTeaching(user)) {
     const ids = await teacherClassIds(user);
     return students.filter((s) => ids.includes(s.classId)).map((s) => stripFields(s, FEE_FIELDS));
   }
@@ -76,7 +82,7 @@ async function assertClassAccess(user, classId, { write = false } = {}) {
   const cls = await findById("classes", classId);
   if (!cls) fail(404, "Class not found.");
   if (user.role === "admin") return cls;
-  if (user.role === "teacher" && (cls.teacherIds || []).includes(user.id)) return cls;
+  if (isTeaching(user) && staffOf(cls).includes(user.id)) return cls;
   if (!write && user.role === "parent") {
     const kids = (await all("students")).filter((s) => (user.studentIds || []).includes(s.id));
     if (kids.some((k) => k.classId === classId)) return cls;
@@ -114,6 +120,25 @@ function attendanceSummary(records, studentId) {
   return { counts, total, rate, history };
 }
 
+// Files arrive as base64 inside JSON and are kept under "file:<id>".
+async function saveUpload(id, file) {
+  const buf = Buffer.from(file.data, "base64");
+  if (buf.length > MAX_FILE_BYTES) fail(400, "Files must be 4 MB or smaller.");
+  const name = String(file.name || "file").replace(/[^\w.\- ()]/g, "_").slice(0, 120);
+  const type = file.type || "application/octet-stream";
+  await (await db()).setFile(`file:${id}`, buf, { name, type });
+  return { name, type, size: buf.length };
+}
+
+async function sendFile(id) {
+  const f = await (await db()).getFile(`file:${id}`);
+  if (!f) fail(404, "File not found.");
+  return new Response(f.data, { headers: {
+    "content-type": f.metadata?.type || "application/octet-stream",
+    "content-disposition": `attachment; filename="${encodeURIComponent(f.metadata?.name || "file")}"`,
+  } });
+}
+
 async function readBody(req) {
   try { return await req.json(); } catch { return {}; }
 }
@@ -136,18 +161,37 @@ route("GET", "/setup", async () => {
 
 route("POST", "/setup", async ({ body }) => {
   if ((await all("users")).length) fail(400, "Setup has already been completed.");
-  const { name, username, password, schoolName } = body;
+  const { name, username, password, schoolName, email } = body;
   if (!name || !username || !password || password.length < 8) fail(400, "Name, username and a password of at least 8 characters are required.");
   if (schoolName) await (await db()).setJSON("settings", { ...(await getSettings()), schoolName });
-  const user = await upsert("users", { name, username: username.toLowerCase().trim(), role: "admin", passHash: hashPassword(password), active: true });
+  const user = await upsert("users", { name, email: email || "", username: username.toLowerCase().trim(), role: "admin", passHash: hashPassword(password), active: true });
   return { token: await signToken(user), user: publicUser(user) };
 }, { auth: false });
 
 route("POST", "/auth/login", async ({ body }) => {
   const username = String(body.username || "").toLowerCase().trim();
-  const user = (await all("users")).find((u) => u.username === username);
+  const users = await all("users");
+  // People often type their email instead of their username, so accept either.
+  const user = users.find((u) => u.username === username) || users.find((u) => u.email && u.email.toLowerCase() === username);
   if (!user || user.active === false || !checkPassword(body.password, user.passHash)) fail(401, "Wrong username or password.");
   return { token: await signToken(user), user: publicUser(user) };
+}, { auth: false });
+
+// Locked-out admin: with ADMIN_RECOVERY_CODE set in Netlify's environment variables,
+// the code resets an admin's password (or creates a new admin if the username is new).
+route("POST", "/auth/recover", async ({ body }) => {
+  const code = process.env.ADMIN_RECOVERY_CODE || "";
+  if (code.length < 12) fail(400, "Recovery isn't switched on. Add ADMIN_RECOVERY_CODE (12+ characters) in Netlify's environment variables, then redeploy.");
+  if (!safeEqual(body.code || "", code)) fail(401, "That recovery code is wrong.");
+  const username = String(body.username || "").toLowerCase().trim();
+  if (!username || !body.password || body.password.length < 8) fail(400, "Enter a username and a new password of at least 8 characters.");
+  const users = await all("users");
+  const existing = users.find((u) => u.username === username);
+  if (existing && existing.role !== "admin") fail(400, "That username belongs to a teacher or parent. Pick a different username for the admin.");
+  const saved = await upsert("users", existing
+    ? { id: existing.id, passHash: hashPassword(body.password), active: true, tokenVersion: (existing.tokenVersion || 0) + 1 }
+    : { name: body.name || username, username, role: "admin", passHash: hashPassword(body.password), active: true });
+  return { token: await signToken(saved), user: publicUser(saved), admins: users.filter((u) => u.role === "admin").map((u) => u.username) };
 }, { auth: false });
 
 route("GET", "/auth/me", async ({ user }) => ({ user: publicUser(user), settings: await getSettings() }));
@@ -174,11 +218,11 @@ route("GET", "/users", async ({ user }) => {
   requireRole(user, "admin");
   return (await all("users")).map(publicUser);
 });
-route("GET", "/teachers", async () => (await all("users")).filter((u) => u.role === "teacher" || u.role === "admin").map((u) => ({ id: u.id, name: u.name, role: u.role })));
+route("GET", "/teachers", async () => (await all("users")).filter((u) => u.role !== "parent" && u.active !== false).map((u) => ({ id: u.id, name: u.name, role: u.role, phone: u.phone || "" })));
 route("POST", "/users", async ({ user, body }) => {
   requireRole(user, "admin");
   const username = String(body.username || "").toLowerCase().trim();
-  if (!body.name || !username || !["admin", "teacher", "parent"].includes(body.role)) fail(400, "Name, username and role are required.");
+  if (!body.name || !username || !["admin", "teacher", "assistant", "parent"].includes(body.role)) fail(400, "Name, username and role are required.");
   const users = await all("users");
   if (users.some((u) => u.username === username && u.id !== body.id)) fail(400, "That username is already taken.");
   const record = { ...pick(body, ["id", "name", "role", "phone", "email", "studentIds", "active"]), username };
@@ -196,7 +240,10 @@ route("DELETE", "/users/:id", async ({ user, params }) => {
   if (params.id === user.id) fail(400, "You can't delete your own account.");
   await remove("users", params.id);
   const classes = await all("classes");
-  classes.forEach((c) => { c.teacherIds = (c.teacherIds || []).filter((t) => t !== params.id); });
+  classes.forEach((c) => {
+    c.teacherIds = (c.teacherIds || []).filter((t) => t !== params.id);
+    c.assistantIds = (c.assistantIds || []).filter((t) => t !== params.id);
+  });
   await saveAll("classes", classes);
   return { ok: true };
 });
@@ -238,7 +285,7 @@ async function visibleClasses(user) {
   const students = await all("students");
   const count = (id) => students.filter((s) => s.classId === id && s.active !== false).length;
   let visible = classes;
-  if (user.role === "teacher") visible = classes.filter((c) => (c.teacherIds || []).includes(user.id));
+  if (isTeaching(user)) visible = classes.filter((c) => staffOf(c).includes(user.id));
   if (user.role === "parent") {
     const kidClasses = students.filter((s) => (user.studentIds || []).includes(s.id)).map((s) => s.classId);
     visible = classes.filter((c) => kidClasses.includes(c.id));
@@ -248,7 +295,7 @@ async function visibleClasses(user) {
 route("POST", "/classes", async ({ user, body }) => {
   requireRole(user, "admin");
   if (!body.name) fail(400, "Class name is required.");
-  return upsert("classes", pick(body, ["id", "name", "order", "teacherIds", "whatsappLink", "room", "fee", "schedule"]));
+  return upsert("classes", pick(body, ["id", "name", "order", "teacherIds", "assistantIds", "whatsappLink", "room", "fee", "schedule"]));
 });
 route("PUT", "/classes/:id/whatsapp", async ({ user, params, body }) => {
   await assertClassAccess(user, params.id, { write: true });
@@ -330,7 +377,7 @@ route("GET", "/students/:id/profile", async ({ user, params }) => {
   if (user.role === "parent") notes = notes.filter((n) => n.visibleToParent);
   notes.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   let finance = null;
-  if (user.role !== "teacher") {
+  if (!isTeaching(user)) {
     const payments = (await all("payments")).filter((p) => p.studentId === student.id).sort((a, b) => b.date.localeCompare(a.date));
     const fee = feeFor(student, classes, settings);
     const paid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
@@ -435,18 +482,12 @@ route("GET", "/assignments", async ({ user, url }) => {
 });
 route("POST", "/assignments", async ({ user, body }) => {
   await assertClassAccess(user, body.classId, { write: true });
+  if (body.id) await assertClassAccess(user, (await findById("assignments", body.id))?.classId, { write: true });
   if (!body.title) fail(400, "Title is required.");
   const record = { ...pick(body, ["id", "classId", "title", "description", "dueDate", "subject", "link"]) };
   if (!body.id) { record.createdBy = user.name; record.createdById = user.id; }
-  const id = body.id || newId();
-  record.id = id;
-  if (body.file?.data) {
-    const buf = Buffer.from(body.file.data, "base64");
-    if (buf.length > MAX_FILE_BYTES) fail(400, "Files must be 4 MB or smaller.");
-    const name = String(body.file.name || "file").replace(/[^\w.\- ()]/g, "_").slice(0, 120);
-    await (await db()).setFile(`file:${id}`, buf, { name, type: body.file.type || "application/octet-stream" });
-    record.file = { name, type: body.file.type || "application/octet-stream", size: buf.length };
-  }
+  record.id = body.id || newId();
+  if (body.file?.data) record.file = await saveUpload(record.id, body.file);
   return upsert("assignments", record);
 });
 route("DELETE", "/assignments/:id", async ({ user, params }) => {
@@ -461,12 +502,55 @@ route("GET", "/assignments/:id/file", async ({ user, params }) => {
   const a = await findById("assignments", params.id);
   if (!a || !a.file) fail(404, "File not found.");
   await assertClassAccess(user, a.classId);
-  const f = await (await db()).getFile(`file:${a.id}`);
-  if (!f) fail(404, "File not found.");
-  return new Response(f.data, { headers: {
-    "content-type": f.metadata?.type || "application/octet-stream",
-    "content-disposition": `attachment; filename="${encodeURIComponent(f.metadata?.name || "file")}"`,
-  } });
+  return sendFile(a.id);
+});
+
+// Lesson plans: teachers write them for their grade; the admin reviews them. Parents never see them.
+const PLAN_FIELDS = ["classId", "weekOf", "subject", "title", "objectives", "activities", "resources", "homework", "assessment", "notes", "link"];
+route("GET", "/lessonplans", async ({ user, url }) => {
+  requireRole(user, "admin", "teacher");
+  const classId = url.searchParams.get("classId");
+  const allowed = (await visibleClasses(user)).map((c) => c.id);
+  return (await all("lessonplans"))
+    .filter((p) => allowed.includes(p.classId) && (!classId || p.classId === classId))
+    .sort((a, b) => (b.weekOf || "").localeCompare(a.weekOf || "") || b.createdAt.localeCompare(a.createdAt));
+});
+route("POST", "/lessonplans", async ({ user, body }) => {
+  requireRole(user, "admin", "teacher");
+  await assertClassAccess(user, body.classId, { write: true });
+  const existing = body.id ? await findById("lessonplans", body.id) : null;
+  if (body.id && !existing) fail(404, "Lesson plan not found.");
+  if (existing) await assertClassAccess(user, existing.classId, { write: true });
+  if (!body.title) fail(400, "Give the lesson a title.");
+  const record = { ...pick(body, PLAN_FIELDS), id: existing?.id || newId() };
+  record.status = body.status === "draft" ? "draft" : "submitted";
+  // An admin tidying up an approved plan shouldn't send it back for review.
+  if (user.role === "admin" && existing && record.status === "submitted" && existing.status !== "draft") record.status = existing.status;
+  if (!existing) { record.authorId = user.id; record.authorName = user.name; }
+  if (body.file?.data) record.file = await saveUpload(`plan:${record.id}`, body.file);
+  return upsert("lessonplans", record);
+});
+route("POST", "/lessonplans/:id/review", async ({ user, params, body }) => {
+  requireRole(user, "admin");
+  const plan = await findById("lessonplans", params.id);
+  if (!plan) fail(404, "Lesson plan not found.");
+  const status = body.status === "approved" ? "approved" : "changes";
+  return upsert("lessonplans", { id: plan.id, status, feedback: String(body.feedback || ""), reviewedBy: user.name, reviewedAt: new Date().toISOString() });
+});
+route("DELETE", "/lessonplans/:id", async ({ user, params }) => {
+  const plan = await findById("lessonplans", params.id);
+  if (!plan) fail(404, "Lesson plan not found.");
+  await assertClassAccess(user, plan.classId, { write: true });
+  await remove("lessonplans", plan.id);
+  await (await db()).del(`file:plan:${plan.id}`);
+  return { ok: true };
+});
+route("GET", "/lessonplans/:id/file", async ({ user, params }) => {
+  requireRole(user, "admin", "teacher");
+  const plan = await findById("lessonplans", params.id);
+  if (!plan || !plan.file) fail(404, "File not found.");
+  await assertClassAccess(user, plan.classId, { write: true });
+  return sendFile(`plan:${plan.id}`);
 });
 
 // Teacher notes on students
@@ -479,7 +563,7 @@ route("GET", "/notes", async ({ user, url }) => {
     if (user.role === "parent") notes = notes.filter((n) => n.visibleToParent);
   } else {
     requireRole(user, "admin", "teacher");
-    if (user.role === "teacher") {
+    if (isTeaching(user)) {
       const ids = (await visibleStudents(user)).map((s) => s.id);
       notes = notes.filter((n) => ids.includes(n.studentId));
     }
@@ -592,9 +676,10 @@ route("GET", "/dashboard", async ({ user }) => {
   if (user.role === "admin") {
     const summary = await routeFor("GET", "/payments/summary").handler({ user });
     out.finance = { ...summary.totals, unpaidCount: summary.rows.filter((r) => r.balance > 0).length };
-    out.teacherCount = (await all("users")).filter((u) => u.role === "teacher").length;
+    out.teacherCount = (await all("users")).filter(isTeaching).length;
     out.noTeacher = classes.filter((c) => !(c.teacherIds || []).length).map((c) => c.name);
     out.noWhatsapp = classes.filter((c) => !c.whatsappLink).map((c) => c.name);
+    out.plansWaiting = (await all("lessonplans")).filter((p) => p.status === "submitted").length;
   }
   return out;
 });
@@ -658,7 +743,7 @@ route("POST", "/seed", async ({ user, body }) => {
 });
 
 // Backup & restore (admin)
-const BACKUP_COLLECTIONS = ["users", "classes", "students", "tests", "assignments", "notes", "payments", "announcements"];
+const BACKUP_COLLECTIONS = ["users", "classes", "students", "tests", "assignments", "lessonplans", "notes", "payments", "announcements"];
 route("GET", "/backup", async ({ user }) => {
   requireRole(user, "admin");
   const store = await db();

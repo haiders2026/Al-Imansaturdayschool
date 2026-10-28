@@ -40,7 +40,7 @@ export async function loadCommon() {
 }
 
 export const isAdmin = () => state.user?.role === "admin";
-export const isTeacher = () => state.user?.role === "teacher";
+export const isTeacher = () => ["teacher", "assistant"].includes(state.user?.role);
 export const isParent = () => state.user?.role === "parent";
 export const isStaff = () => isAdmin() || isTeacher();
 

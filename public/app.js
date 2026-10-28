@@ -1,15 +1,16 @@
 import { state, api, setToken, logout, loadCommon, esc, toast, onSubmit } from "./js/core.js";
 
 const NAV = [
-  { path: "dashboard", label: "Dashboard", ico: "🏠", roles: ["admin", "teacher", "parent"] },
-  { path: "attendance", label: "Attendance", ico: "✅", roles: ["admin", "teacher"] },
-  { path: "grades", label: "Tests & Grades", ico: "📝", roles: ["admin", "teacher"] },
-  { path: "assignments", label: "Assignments", ico: "📚", roles: ["admin", "teacher", "parent"] },
-  { path: "students", label: "Students", ico: "👧", roles: ["admin", "teacher"] },
-  { path: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", ico: "💬", roles: ["admin", "teacher", "parent"] },
-  { path: "notes", label: "Teacher Notes", ico: "🗒️", roles: ["admin", "teacher"] },
+  { path: "dashboard", label: "Dashboard", ico: "🏠", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "attendance", label: "Attendance", ico: "✅", roles: ["admin", "teacher", "assistant"] },
+  { path: "grades", label: "Tests & Grades", ico: "📝", roles: ["admin", "teacher", "assistant"] },
+  { path: "assignments", label: "Assignments", ico: "📚", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "lessonplans", label: "Lesson Plans", ico: "🗂️", roles: ["admin", "teacher", "assistant"] },
+  { path: "students", label: "Students", ico: "👧", roles: ["admin", "teacher", "assistant"] },
+  { path: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", ico: "💬", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "notes", label: "Teacher Notes", ico: "🗒️", roles: ["admin", "teacher", "assistant"] },
   { path: "payments", label: "Payments", ico: "💳", roles: ["admin"] },
-  { path: "reports", label: "Reports", ico: "📊", roles: ["admin", "teacher"] },
+  { path: "reports", label: "Reports", ico: "📊", roles: ["admin", "teacher", "assistant"] },
   { path: "users", label: "Staff & Logins", ico: "👥", roles: ["admin"] },
   { path: "settings", label: "Settings & Import", ico: "⚙️", roles: ["admin"] },
 ];
@@ -22,6 +23,7 @@ const PAGES = {
   students: () => import("./js/pages/students.js"),
   student: () => import("./js/pages/student.js"),
   classes: () => import("./js/pages/classes.js"),
+  lessonplans: () => import("./js/pages/lessonplans.js"),
   notes: () => import("./js/pages/notes.js"),
   payments: () => import("./js/pages/payments.js"),
   reports: () => import("./js/pages/reports.js"),
@@ -54,23 +56,48 @@ async function boot() {
 }
 
 function brand() {
-  return `<div class="brand"><img src="/icon.svg" alt=""><div>${esc(state.settings.schoolName || "Al-Iman Saturday School")}<small>School manager</small></div></div>`;
+  return `<div class="brand"><img src="/logo.png" alt="Al-Iman logo"><div>${esc(state.settings.schoolName || "Al-Iman Saturday School")}<small>School manager</small></div></div>`;
 }
 
 function renderLogin() {
   app.innerHTML = `<div class="center-screen auth-bg"><form class="auth-card" id="login">
     ${brand()}
     <h2>Sign in</h2>
-    <div class="field"><label for="u">Username or phone</label><input id="u" name="username" autocomplete="username" required></div>
+    <div class="field"><label for="u">Username, email or phone</label><input id="u" name="username" autocomplete="username" required></div>
     <div class="field"><label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required></div>
     <button class="btn" style="width:100%" type="submit">Sign in</button>
     <p class="muted small">Parents: use the phone number and password the school sent you. Forgot it? Ask the school office to reset it.</p>
+    <p class="small"><a href="#" id="recover">Admin locked out?</a></p>
   </form></div>`;
+  document.getElementById("recover").onclick = (e) => { e.preventDefault(); renderRecover(); };
   onSubmit(document.getElementById("login"), async (v) => {
     const res = await api("POST", "/auth/login", v);
     setToken(res.token);
-    location.hash = "#/dashboard";
+    location.hash = "";
     location.reload();
+  });
+}
+
+function renderRecover() {
+  app.innerHTML = `<div class="center-screen auth-bg"><form class="auth-card" id="rec">
+    ${brand()}
+    <h2>Reset the admin login</h2>
+    <ol class="small muted" style="padding-left:18px">
+      <li>In Netlify, open the site → <strong>Site configuration → Environment variables</strong>.</li>
+      <li>Add <code>ADMIN_RECOVERY_CODE</code> with a secret of 12+ characters only you know.</li>
+      <li>Go to <strong>Deploys → Trigger deploy</strong>, wait a minute, then fill this in.</li>
+    </ol>
+    <div class="field"><label>Recovery code</label><input name="code" type="password" required></div>
+    <div class="field"><label>Admin username (existing, or a new one to create)</label><input name="username" autocapitalize="none" required></div>
+    <div class="field"><label>New password (8+ characters)</label><input name="password" type="password" minlength="8" autocomplete="new-password" required></div>
+    <button class="btn" style="width:100%" type="submit">Reset and sign in</button>
+    <p class="small"><a href="/">Back to sign in</a></p>
+  </form></div>`;
+  onSubmit(document.getElementById("rec"), async (v) => {
+    const res = await api("POST", "/auth/recover", v);
+    setToken(res.token);
+    toast(`Signed in. Admin usernames: ${res.admins.join(", ")}`);
+    setTimeout(() => { location.hash = ""; location.reload(); }, 1500);
   });
 }
 
@@ -81,7 +108,8 @@ function renderSetup() {
     <p class="muted small">Create the first administrator account. You can add teachers and parents after this.</p>
     <div class="field"><label>School name</label><input name="schoolName" value="Al-Iman Saturday School" required></div>
     <div class="field"><label>Your name</label><input name="name" required></div>
-    <div class="field"><label>Username</label><input name="username" autocomplete="username" required></div>
+    <div class="field"><label>Username (you'll type this to sign in)</label><input name="username" autocomplete="username" autocapitalize="none" required></div>
+    <div class="field"><label>Email (you can also sign in with this)</label><input name="email" type="email" autocomplete="email"></div>
     <div class="field"><label>Password (8+ characters)</label><input name="password" type="password" minlength="8" autocomplete="new-password" required></div>
     <button class="btn" style="width:100%" type="submit">Create admin account</button>
   </form></div>`;
@@ -95,7 +123,7 @@ function renderSetup() {
 
 function renderShell() {
   const role = state.user.role;
-  const roleLabel = { admin: "Administrator", teacher: "Teacher", parent: "Parent" }[role];
+  const roleLabel = { admin: "Administrator", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" }[role];
   app.innerHTML = `<div class="shell" id="shell">
     <aside class="sidebar">
       ${brand()}
@@ -117,6 +145,10 @@ function renderShell() {
 }
 
 async function route() {
+  if (!location.hash.replace(/^#\/?/, "") && ["teacher", "assistant"].includes(state.user.role) && state.classes.length) {
+    location.replace("#/attendance");
+    return;
+  }
   const [name = "dashboard", ...params] = location.hash.replace(/^#\/?/, "").split("/");
   const page = document.getElementById("page");
   const navItem = NAV.find((n) => n.path === name);
