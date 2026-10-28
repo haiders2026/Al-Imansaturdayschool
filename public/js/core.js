@@ -173,7 +173,7 @@ export function onSubmit(form, action) {
 }
 
 export const classOptions = (selected, { includeAll = false, allLabel = "All classes" } = {}) =>
-  (includeAll ? `<option value="">${esc(allLabel)}</option>` : "") +
+  (includeAll && state.classes.length > 1 ? `<option value="">${esc(allLabel)}</option>` : "") +
   state.classes.map((c) => `<option value="${c.id}" ${c.id === selected ? "selected" : ""}>${esc(c.name)}</option>`).join("");
 
 export function rememberClass(id) { if (id) localStorage.setItem("lastClass", id); }

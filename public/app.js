@@ -7,7 +7,7 @@ const NAV = [
   { path: "assignments", label: "Assignments", ico: "📚", roles: ["admin", "teacher", "assistant", "parent"] },
   { path: "lessonplans", label: "Lesson Plans", ico: "🗂️", roles: ["admin", "teacher", "assistant"] },
   { path: "students", label: "Students", ico: "👧", roles: ["admin", "teacher", "assistant"] },
-  { path: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", ico: "💬", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", teacherLabel: "My class & WhatsApp", ico: "💬", roles: ["admin", "teacher", "assistant", "parent"] },
   { path: "notes", label: "Teacher Notes", ico: "🗒️", roles: ["admin", "teacher", "assistant"] },
   { path: "payments", label: "Payments", ico: "💳", roles: ["admin"] },
   { path: "reports", label: "Reports", ico: "📊", roles: ["admin", "teacher", "assistant"] },
@@ -123,13 +123,15 @@ function renderSetup() {
 
 function renderShell() {
   const role = state.user.role;
+  const teaching = role === "teacher" || role === "assistant";
   const roleLabel = { admin: "Administrator", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" }[role];
   app.innerHTML = `<div class="shell" id="shell">
     <aside class="sidebar">
       ${brand()}
       <nav class="nav">${NAV.filter((n) => n.roles.includes(role)).map((n) =>
-        `<a href="#/${n.path}" data-path="${n.path}"><span class="ico">${n.ico}</span>${(role === "parent" && n.parentLabel) || n.label}</a>`).join("")}</nav>
+        `<a href="#/${n.path}" data-path="${n.path}"><span class="ico">${n.ico}</span>${(role === "parent" && n.parentLabel) || (teaching && n.teacherLabel) || n.label}</a>`).join("")}</nav>
       <div class="who">${esc(state.user.name)}<br><span style="opacity:.7">${roleLabel}</span><br>
+        ${teaching ? `<span style="opacity:.9">${state.classes.length ? `Your class: <strong>${esc(state.classes.map((c) => c.name).join(", "))}</strong>` : "No class assigned yet"}</span><br>` : ""}
         <a href="#/account">My account</a> · <a href="#" id="logout">Sign out</a></div>
     </aside>
     <div>

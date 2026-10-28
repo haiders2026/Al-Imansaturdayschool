@@ -4,7 +4,7 @@ export async function render(page) {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   let q = params.get("q") || "";
   let cls = params.get("class") || "";
-  let showInactive = false;
+  let showInactive = false, code = "";
 
   page.innerHTML = `
     <div class="page-head"><div><h1>Students</h1><div class="muted" id="count"></div></div>
@@ -13,7 +13,8 @@ export async function render(page) {
       <div class="toolbar">
         <div class="field" style="flex:1"><label>Search</label><input id="q" placeholder="Name, parent, phone…" value="${esc(q)}"></div>
         <div class="field"><label>Class</label><select id="cls">${classOptions(cls, { includeAll: true })}</select></div>
-        ${isAdmin() ? `<label class="check"><input type="checkbox" id="inactive"> Show withdrawn</label>` : ""}
+        ${isAdmin() ? `<div class="field"><label>Code</label><select id="code"><option value="">All</option><option>R</option><option>C</option></select></div>
+          <label class="check"><input type="checkbox" id="inactive"> Show withdrawn</label>` : ""}
       </div>
       <div id="table"></div>
     </div>`;
@@ -21,14 +22,15 @@ export async function render(page) {
   const filtered = () => state.students
     .filter((s) => showInactive || s.active !== false)
     .filter((s) => !cls || s.classId === cls)
+    .filter((s) => !code || (s.code || "C") === code)
     .filter((s) => !q || [studentName(s), s.fatherName, s.motherName, s.guardianName, s.fatherPhone, s.motherPhone, s.studentCode].join(" ").toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => className(a.classId).localeCompare(className(b.classId), undefined, { numeric: true }) || studentName(a).localeCompare(studentName(b)));
 
   const draw = () => {
     const list = filtered();
     page.querySelector("#count").textContent = `${list.length} student${list.length === 1 ? "" : "s"}`;
-    page.querySelector("#table").innerHTML = list.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Class</th><th>Parent / guardian</th><th>Phone</th><th></th></tr></thead><tbody>
-      ${list.map((s) => `<tr class="clickable" data-id="${s.id}"><td><strong>${esc(studentName(s))}</strong> ${s.active === false ? `<span class="badge red">Withdrawn</span>` : ""}</td>
+    page.querySelector("#table").innerHTML = list.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th>${isAdmin() ? "<th>Code</th>" : ""}<th>Class</th><th>Parent / guardian</th><th>Phone</th><th></th></tr></thead><tbody>
+      ${list.map((s) => `<tr class="clickable" data-id="${s.id}"><td><strong>${esc(studentName(s))}</strong> ${s.active === false ? `<span class="badge red">Withdrawn</span>` : ""}</td>${isAdmin() ? `<td><span class="badge ${s.code === "R" ? "blue" : ""}">${s.code === "R" ? "R" : "C"}</span></td>` : ""}
         <td>${esc(className(s.classId))}</td><td>${esc([s.fatherName, s.motherName].filter(Boolean).join(" / ") || s.guardianName || "")}</td>
         <td>${esc(parentPhone(s))}</td>
         <td>${parentPhone(s) ? `<a class="btn sm wa" href="${waChat(parentPhone(s))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">WhatsApp</a>` : ""}</td></tr>`).join("")}
@@ -39,10 +41,11 @@ export async function render(page) {
 
   page.querySelector("#q").oninput = (e) => { q = e.target.value; draw(); };
   page.querySelector("#cls").onchange = (e) => { cls = e.target.value; draw(); };
+  page.querySelector("#code")?.addEventListener("change", (e) => { code = e.target.value; draw(); });
   page.querySelector("#inactive")?.addEventListener("change", (e) => { showInactive = e.target.checked; draw(); });
   page.querySelector("#add")?.addEventListener("click", () => studentForm());
   page.querySelector("#export").onclick = () => {
-    const cols = ["firstName", "lastName", "classId", "gender", "dob", "fatherName", "fatherPhone", "fatherEmail", "motherName", "motherPhone", "motherEmail", "guardianName", "guardianPhone", "address", "emergencyContact", "emergencyPhone", "medical", "allergies"];
+    const cols = ["firstName", "lastName", "classId", "gender", "dob", "fatherName", "fatherPhone", "fatherEmail", "motherName", "motherPhone", "motherEmail", "guardianName", "guardianPhone", "address", "emergencyContact", "emergencyPhone", "medical", "allergies", ...(isAdmin() ? ["code", "books"] : [])];
     download("students.csv", toCSV([cols.map((c) => (c === "classId" ? "class" : c)), ...filtered().map((s) => cols.map((c) => (c === "classId" ? className(s.classId) : s[c])))]));
   };
   page.querySelector("#msg").onclick = () => messageParents(filtered());
@@ -92,7 +95,9 @@ export function studentForm(s = {}) {
         ${f("allergies", "Allergies")}${f("medical", "Medical notes")}
       </div><label class="check"><input type="checkbox" name="photoConsent" ${s.photoConsent ? "checked" : ""}> Photo consent given</label></fieldset>
       ${isAdmin() ? `<fieldset><legend>Office only</legend><div class="form-grid">
-        ${f("fee", `Fee override (${esc(state.settings.currency || "$")}) — leave blank to use the class fee`, "number", 'step="0.01" min="0"')}
+        <div class="field"><label>Code (private)</label><select name="code"><option value="C" ${s.code !== "R" ? "selected" : ""}>C</option><option value="R" ${s.code === "R" ? "selected" : ""}>R</option></select></div>
+        <div class="field"><label>Books</label><select name="books">${[0, 1, 2, 3].map((n) => `<option ${n === (s.books ?? 1) ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        ${f("fee", `Base fee override (${esc(state.settings.currency || "$")}) — blank uses the normal fee`, "number", 'step="0.01" min="0"')}
       </div><div class="field"><label>Admin note (not shown to teachers or parents)</label><textarea name="adminNote">${esc(s.adminNote || "")}</textarea></div>
       <label class="check"><input type="checkbox" name="active" ${s.active !== false ? "checked" : ""}> Currently enrolled</label></fieldset>` : ""}
       <div class="modal-foot"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn" type="submit">Save</button></div></form>`,

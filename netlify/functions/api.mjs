@@ -17,11 +17,15 @@ const DEFAULT_SETTINGS = {
   schoolName: "Al-Iman Saturday School",
   academicYear: "2026-2027",
   currency: "$",
-  defaultFee: 0,
+  defaultFee: 150,
+  bookFee: 25,
   passMark: 60,
   contactPhone: "",
   countryCode: "1",
 };
+
+// Fee settings are office business; everyone else gets the rest.
+const settingsFor = (user, settings) => (user.role === "admin" ? settings : stripFields(settings, ["defaultFee", "bookFee"]));
 
 async function getSettings() {
   return { ...DEFAULT_SETTINGS, ...((await (await db()).getJSON("settings")) || {}) };
@@ -36,9 +40,10 @@ const STUDENT_FIELDS = [
   "firstName", "lastName", "classId", "gender", "dob", "studentCode", "active", "enrolledOn",
   "fatherName", "fatherPhone", "fatherEmail", "motherName", "motherPhone", "motherEmail",
   "guardianName", "guardianPhone", "address", "emergencyContact", "emergencyPhone",
-  "medical", "allergies", "photoConsent", "pickupAuthorized", "adminNote", "fee",
+  "medical", "allergies", "photoConsent", "pickupAuthorized", "adminNote", "fee", "books", "code",
 ];
-const FEE_FIELDS = ["fee", "adminNote"];
+// "code" is the school's private R/C code (no code means C); only admins see it.
+const FEE_FIELDS = ["fee", "adminNote", "code", "books"];
 
 // Teachers and assistant teachers work the same way, limited to the grades they're assigned to.
 const TEACHING = ["teacher", "assistant"];
@@ -63,7 +68,7 @@ async function visibleStudents(user) {
     return students.filter((s) => ids.includes(s.classId)).map((s) => stripFields(s, FEE_FIELDS));
   }
   const mine = user.studentIds || [];
-  return students.filter((s) => mine.includes(s.id)).map((s) => stripFields(s, ["adminNote"]));
+  return students.filter((s) => mine.includes(s.id)).map((s) => stripFields(s, ["adminNote", "code"]));
 }
 
 function stripFields(obj, keys) {
@@ -90,12 +95,33 @@ async function assertClassAccess(user, classId, { write = false } = {}) {
   fail(403, "You don't have access to this class.");
 }
 
+const isSet = (v) => v !== undefined && v !== null && v !== "";
+const booksFor = (student) => (isSet(student.books) ? Number(student.books) : 1);
+
+// Yearly fee = base fee (student override, else grade fee, else school default) + books × book fee.
 function feeFor(student, classes, settings) {
-  if (student.fee !== undefined && student.fee !== null && student.fee !== "") return Number(student.fee);
   const cls = classes.find((c) => c.id === student.classId);
-  if (cls && cls.fee !== undefined && cls.fee !== null && cls.fee !== "") return Number(cls.fee);
-  return Number(settings.defaultFee) || 0;
+  const base = isSet(student.fee) ? Number(student.fee) : cls && isSet(cls.fee) ? Number(cls.fee) : Number(settings.defaultFee) || 0;
+  return base + booksFor(student) * (Number(settings.bookFee) || 0);
 }
+
+// One-off data fixes for data loaded before a feature existed. Each runs once per site.
+async function runMigrations() {
+  const store = await db();
+  const done = (await store.getJSON("_migrations")) || [];
+  if (!done.includes("fees-and-codes-2026-10")) {
+    const saved = await store.getJSON("settings");
+    if (saved && !Number(saved.defaultFee)) await store.setJSON("settings", { ...saved, defaultFee: DEFAULT_SETTINGS.defaultFee, bookFee: DEFAULT_SETTINGS.bookFee });
+    const students = await all("students");
+    for (const st of students) {
+      const m = /^Status in original sheet: ([RC])$/.exec(st.adminNote || "");
+      if (m) { st.code = m[1]; delete st.adminNote; }
+    }
+    await saveAll("students", students);
+    await store.setJSON("_migrations", [...done, "fees-and-codes-2026-10"]);
+  }
+}
+let migrated = false;
 
 async function attendanceRecords(prefix) {
   const store = await db();
@@ -194,7 +220,7 @@ route("POST", "/auth/recover", async ({ body }) => {
   return { token: await signToken(saved), user: publicUser(saved), admins: users.filter((u) => u.role === "admin").map((u) => u.username) };
 }, { auth: false });
 
-route("GET", "/auth/me", async ({ user }) => ({ user: publicUser(user), settings: await getSettings() }));
+route("GET", "/auth/me", async ({ user }) => ({ user: publicUser(user), settings: settingsFor(user, await getSettings()) }));
 
 route("POST", "/auth/password", async ({ user, body }) => {
   if (!checkPassword(body.current, user.passHash)) fail(400, "Your current password is wrong.");
@@ -205,7 +231,7 @@ route("POST", "/auth/password", async ({ user, body }) => {
 });
 
 // Settings
-route("GET", "/settings", async () => getSettings());
+route("GET", "/settings", async ({ user }) => settingsFor(user, await getSettings()));
 route("PUT", "/settings", async ({ user, body }) => {
   requireRole(user, "admin");
   const next = { ...(await getSettings()), ...pick(body, Object.keys(DEFAULT_SETTINGS)) };
@@ -218,7 +244,13 @@ route("GET", "/users", async ({ user }) => {
   requireRole(user, "admin");
   return (await all("users")).map(publicUser);
 });
-route("GET", "/teachers", async () => (await all("users")).filter((u) => u.role !== "parent" && u.active !== false).map((u) => ({ id: u.id, name: u.name, role: u.role, phone: u.phone || "" })));
+// Admins see all staff; teachers only see who else teaches their own grades.
+route("GET", "/teachers", async ({ user }) => {
+  const staff = (await all("users")).filter((u) => u.role !== "parent" && u.active !== false);
+  if (user.role === "admin") return staff.map((u) => ({ id: u.id, name: u.name, role: u.role, phone: u.phone || "" }));
+  const colleagues = new Set((await visibleClasses(user)).flatMap(staffOf));
+  return staff.filter((u) => colleagues.has(u.id)).map((u) => ({ id: u.id, name: u.name, role: u.role }));
+});
 route("POST", "/users", async ({ user, body }) => {
   requireRole(user, "admin");
   const username = String(body.username || "").toLowerCase().trim();
@@ -315,8 +347,24 @@ route("GET", "/students", async ({ user }) => visibleStudents(user));
 route("POST", "/students", async ({ user, body }) => {
   requireRole(user, "admin");
   if (!body.firstName) fail(400, "First name is required.");
-  return upsert("students", { ...pick(body, ["id", ...STUDENT_FIELDS]), active: body.active !== false });
+  return upsert("students", { ...cleanFeeFields(pick(body, ["id", ...STUDENT_FIELDS])), active: body.active !== false });
 });
+// Quick edit from the payments page: number of books a student takes.
+route("PUT", "/students/:id/books", async ({ user, params, body }) => {
+  requireRole(user, "admin");
+  if (!(await findById("students", params.id))) fail(404, "Student not found.");
+  return upsert("students", cleanFeeFields({ id: params.id, books: body.books }));
+});
+
+function cleanFeeFields(rec) {
+  if (rec.books !== undefined) {
+    const n = Number(rec.books);
+    if (!Number.isInteger(n) || n < 0 || n > 5) fail(400, "Books must be a whole number from 0 to 5.");
+    rec.books = n;
+  }
+  if (rec.code !== undefined && !["R", "C", ""].includes(rec.code)) fail(400, "Code must be R or C.");
+  return rec;
+}
 route("DELETE", "/students/:id", async ({ user, params }) => {
   requireRole(user, "admin");
   await remove("students", params.id);
@@ -604,7 +652,7 @@ route("GET", "/payments/summary", async ({ user }) => {
   const rows = students.filter((s) => s.active !== false).map((s) => {
     const paid = payments.filter((p) => p.studentId === s.id).reduce((sum, p) => sum + Number(p.amount || 0), 0);
     const fee = feeFor(s, classes, settings);
-    return { studentId: s.id, fee, paid, balance: fee - paid };
+    return { studentId: s.id, fee, paid, balance: fee - paid, books: booksFor(s) };
   });
   const totals = rows.reduce((t, r) => ({ fee: t.fee + r.fee, paid: t.paid + r.paid, balance: t.balance + Math.max(r.balance, 0) }), { fee: 0, paid: 0, balance: 0 });
   return { rows, totals };
@@ -790,6 +838,7 @@ export default async (req) => {
       user = await findById("users", claims.sub);
       if (!user || user.active === false || (user.tokenVersion || 0) !== claims.ver) fail(401, "Please sign in again.");
     }
+    if (user?.role === "admin" && !migrated) { await runMigrations(); migrated = true; }
     const body = ["POST", "PUT"].includes(req.method) ? await readBody(req) : {};
     const result = await match.handler({ req, url, user, body, params: match.params });
     return result instanceof Response ? result : json(result);
