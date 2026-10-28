@@ -88,7 +88,7 @@ function classForm(c, teachers) {
       <div class="field"><label>Name</label><input name="name" value="${esc(c.name || "")}" placeholder="e.g. Grade 3" required></div>
       <div class="field"><label>Sort order</label><input type="number" name="order" value="${c.order ?? ""}"></div>
       <div class="field"><label>Room</label><input name="room" value="${esc(c.room || "")}"></div>
-      <div class="field"><label>Yearly fee per student (${esc(state.settings.currency || "$")})</label><input type="number" step="0.01" name="fee" value="${c.fee ?? ""}" placeholder="uses school default"></div></div>
+      <div class="field"><label>Yearly base fee for this grade (${esc(state.settings.currency || "$")})</label><input type="number" step="0.01" name="fee" value="${c.fee ?? ""}" placeholder="uses school default"></div></div>
       <fieldset><legend>Who teaches this grade?</legend>
         ${teachers.length ? `<table><thead><tr><th>Staff</th><th>Teacher</th><th>Assistant</th></tr></thead><tbody>
           ${teachers.map((t) => `<tr><td>${esc(t.name)} <span class="muted small">${t.role === "admin" ? "admin" : t.role === "assistant" ? "assistant teacher" : ""}</span></td>

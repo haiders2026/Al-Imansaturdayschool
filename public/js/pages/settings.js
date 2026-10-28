@@ -58,14 +58,15 @@ function schoolTab(body) {
     <div class="field"><label>School name</label><input name="schoolName" value="${esc(s.schoolName)}" required></div>
     <div class="field"><label>Academic year</label><input name="academicYear" value="${esc(s.academicYear)}"></div>
     <div class="field"><label>Currency symbol</label><input name="currency" value="${esc(s.currency)}"></div>
-    <div class="field"><label>Default yearly fee per student</label><input type="number" step="0.01" name="defaultFee" value="${esc(s.defaultFee)}"></div>
+    <div class="field"><label>Yearly base fee per student</label><input type="number" step="0.01" name="defaultFee" value="${esc(s.defaultFee)}"></div>
+    <div class="field"><label>Fee per book</label><input type="number" step="0.01" name="bookFee" value="${esc(s.bookFee)}"></div>
     <div class="field"><label>Pass mark (%)</label><input type="number" name="passMark" value="${esc(s.passMark)}"></div>
     <div class="field"><label>Country calling code (for WhatsApp)</label><input name="countryCode" value="${esc(s.countryCode)}" placeholder="1 for USA/Canada"></div>
     <div class="field"><label>School contact phone</label><input name="contactPhone" value="${esc(s.contactPhone)}"></div></div>
-    <p class="muted small">Fees: each student owes their own fee override if set, otherwise their grade's fee, otherwise this default.</p>
+    <p class="muted small">Each student owes the base fee plus the book fee for each book they take (1 book unless you change it). A grade can have its own base fee, and a student can have a base-fee override for discounts.</p>
     <button class="btn" type="submit">Save settings</button></form>`;
   onSubmit(body.querySelector("form"), async (v) => {
-    state.settings = await api("PUT", "/settings", { ...v, defaultFee: Number(v.defaultFee) || 0, passMark: Number(v.passMark) || 60 });
+    state.settings = await api("PUT", "/settings", { ...v, defaultFee: Number(v.defaultFee) || 0, bookFee: Number(v.bookFee) || 0, passMark: Number(v.passMark) || 60 });
     toast("Settings saved");
   });
 }

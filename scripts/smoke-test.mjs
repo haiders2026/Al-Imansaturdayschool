@@ -14,6 +14,10 @@ async function call(method, p, body, expect = 200) {
 }
 const ok = (cond, msg) => { if (!cond) throw new Error("FAILED: " + msg); console.log("✓", msg); };
 
+// Data saved before fees and codes existed, to check the one-time migration.
+const { db } = await import("../netlify/functions/lib/store.mjs");
+await (await db()).setJSON("settings", { schoolName: "Old", defaultFee: 0 });
+await (await db()).setJSON("students", [{ id: "old1", firstName: "Old", lastName: "Student", adminNote: "Status in original sheet: R" }]);
 ok((await call("GET", "/setup")).needsSetup, "fresh install needs setup");
 token = (await call("POST", "/setup", { name: "Admin", username: "admin", email: "Admin@Example.com", password: "password123" })).token;
 await call("POST", "/auth/login", { username: "admin@example.com", password: "password123" });
@@ -29,6 +33,15 @@ await call("POST", "/auth/password", { current: "recovered12", next: "password12
 token = (await call("POST", "/auth/login", { username: "admin", password: "password123" })).token;
 delete process.env.ADMIN_RECOVERY_CODE;
 await call("POST", "/setup", { name: "X", username: "x", password: "password123" }, 400);
+const old = (await call("GET", "/students")).find((x) => x.id === "old1");
+ok(old.code === "R" && old.adminNote === undefined, "old R/C status notes become the private code");
+const fees = await call("GET", "/settings");
+ok(fees.defaultFee === 150 && fees.bookFee === 25, "fee settings filled in for existing schools");
+ok((await call("GET", "/payments/summary")).rows.find((r) => r.studentId === "old1").fee === 175, "fee is $150 + one $25 book by default");
+await call("PUT", "/students/old1/books", { books: 2 });
+ok((await call("GET", "/payments/summary")).rows.find((r) => r.studentId === "old1").fee === 200, "a second book adds $25");
+await call("PUT", "/students/old1/books", { books: 9 }, 400);
+await call("DELETE", "/students/old1");
 ok(true, "setup can't run twice");
 
 const seedFile = process.argv[2];
@@ -57,7 +70,7 @@ const adminToken = token;
 token = (await call("POST", "/auth/login", { username: "TT", password: "teacherpass" })).token;
 ok((await call("GET", "/classes")).length === 1, "teacher sees only their class");
 const tStudents = await call("GET", "/students");
-ok(tStudents.length === kids.length && tStudents.every((s) => s.fee === undefined && s.adminNote === undefined), "teacher sees only their students, without fee/admin fields");
+ok(tStudents.length === kids.length && tStudents.every((s) => s.fee === undefined && s.adminNote === undefined && s.code === undefined && s.books === undefined), "teacher sees only their students, without fee/admin/code fields");
 await call("GET", "/payments/summary", null, 403);
 ok(true, "teacher can't see payments");
 const other = classes.find((c) => c.id !== cls.id);
@@ -101,11 +114,11 @@ ok(created.length > 0, `${created.length} parent logins generated`);
 const fam = created.find((c) => c.studentIds.includes(kids[0].id));
 await call("POST", "/payments", { studentId: kids[0].id, amount: 100, method: "Cash" });
 const summary = await call("GET", "/payments/summary");
-ok(summary.rows.find((r) => r.studentId === kids[0].id).fee === 300, "default fee applies");
+ok(summary.rows.find((r) => r.studentId === kids[0].id).fee === 325, "default fee plus one book applies");
 
 token = (await call("POST", "/auth/login", { username: fam.username, password: fam.tempPassword })).token;
 const mine = await call("GET", "/students");
-ok(mine.length === fam.studentIds.length && mine.every((s) => s.adminNote === undefined), "parent sees only their own children");
+ok(mine.length === fam.studentIds.length && mine.every((s) => s.adminNote === undefined && s.code === undefined), "parent sees only their own children, without private code");
 const prof = await call("GET", `/students/${kids[0].id}/profile`);
 ok(prof.notes.length === 1 && prof.notes[0].text === "Shared praise", "parent sees only shared notes");
 ok(prof.grades[0].percent === 90 && prof.attendance.counts.A >= 1 && prof.finance.paid >= 100, "parent sees grades, attendance and balance");

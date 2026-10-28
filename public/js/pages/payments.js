@@ -8,7 +8,7 @@ export async function render(page, [view = "families"]) {
   const collectedThisMonth = payments.filter((p) => p.date?.slice(0, 7) === today().slice(0, 7)).reduce((s, p) => s + Number(p.amount), 0);
 
   page.innerHTML = `
-    <div class="page-head"><div><h1>Payments</h1><div class="muted">Fees are set per class in Grades & WhatsApp, with optional per-student overrides.</div></div>
+    <div class="page-head"><div><h1>Payments</h1><div class="muted">Yearly fee = ${fmtMoney(state.settings.defaultFee)} + ${fmtMoney(state.settings.bookFee)} per book. Change books per student under “By student”, and the amounts in Settings.</div></div>
       <div class="btn-row"><button class="btn secondary" id="export">Export CSV</button><button class="btn" id="pay">+ Record payment</button></div></div>
     <div class="stats">
       <div class="stat"><div class="label">Expected</div><div class="value">${fmtMoney(t.fee)}</div></div>
@@ -45,15 +45,28 @@ function drawBalances(body, rows, page) {
     .sort((a, b) => b.balance - a.balance);
   const draw = () => {
     const l = list();
-    body.querySelector("#t").innerHTML = l.length ? `<div class="table-wrap"><table><thead><tr><th>Student</th><th>Class</th><th class="num">Fee</th><th class="num">Paid</th><th class="num">Balance</th><th></th></tr></thead><tbody>
+    body.querySelector("#t").innerHTML = l.length ? `<div class="table-wrap"><table><thead><tr><th>Student</th><th>Class</th><th>Books</th><th class="num">Fee</th><th class="num">Paid</th><th class="num">Balance</th><th></th></tr></thead><tbody>
       ${l.map((r) => {
         const msg = `As-salamu alaykum ${parentName(r.s)}, this is a gentle reminder from ${state.settings.schoolName} that ${fmtMoney(r.balance)} is still due for ${r.s.firstName}'s ${state.settings.academicYear || ""} fees. JazakAllahu khayran.`;
         return `<tr><td><a href="#/student/${r.s.id}/payments">${esc(studentName(r.s))}</a></td><td>${esc(className(r.s.classId))}</td>
+          <td><select data-books="${r.s.id}" aria-label="Books for ${esc(studentName(r.s))}" style="width:auto;padding:4px 8px">${[0, 1, 2, 3].map((n) => `<option ${n === r.books ? "selected" : ""}>${n}</option>`).join("")}</select></td>
           <td class="num">${fmtMoney(r.fee)}</td><td class="num">${fmtMoney(r.paid)}</td>
           <td class="num">${r.balance > 0 ? `<span class="badge red">${fmtMoney(r.balance)}</span>` : `<span class="badge green">Paid</span>`}</td>
           <td><div class="btn-row"><button class="btn sm" data-pay="${r.s.id}">Record</button>${r.balance > 0 && parentPhone(r.s) ? `<a class="btn sm wa" href="${waChat(parentPhone(r.s), msg)}" target="_blank" rel="noopener">Remind</a>` : ""}</div></td></tr>`;
       }).join("")}</tbody></table></div>` : emptyState("Nobody in this list.");
     body.querySelectorAll("[data-pay]").forEach((b) => b.onclick = () => paymentForm(b.dataset.pay));
+    body.querySelectorAll("[data-books]").forEach((sel) => sel.onchange = async () => {
+      try {
+        const n = Number(sel.value);
+        await api("PUT", `/students/${sel.dataset.books}/books`, { books: n });
+        const r = rows.find((x) => x.studentId === sel.dataset.books);
+        const change = (n - r.books) * (Number(state.settings.bookFee) || 0);
+        Object.assign(r, { books: n, fee: r.fee + change, balance: r.balance + change });
+        studentById(r.studentId).books = n;
+        toast(`Books updated — fee is now ${fmtMoney(r.fee)}`);
+        draw();
+      } catch (err) { toast(err.message, "error"); }
+    });
   };
   draw();
   body.querySelector("#q").oninput = (e) => { q = e.target.value; draw(); };

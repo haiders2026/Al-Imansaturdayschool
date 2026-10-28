@@ -54,7 +54,7 @@ function overview(box, { student: s }) {
       ${row("Date of birth", s.dob && fmtDate(s.dob))}${row("Gender", s.gender)}${row("Student ID", s.studentCode)}${row("Enrolled", s.enrolledOn && fmtDate(s.enrolledOn))}
       ${row("Emergency", [s.emergencyContact, s.emergencyPhone].filter(Boolean).join(" · "))}${row("Pick-up", s.pickupAuthorized)}
       ${row("Allergies", s.allergies)}${row("Medical", s.medical)}${row("Photo consent", s.photoConsent ? "Yes" : "")}
-      ${isAdmin() ? row("Admin note", s.adminNote) : ""}</dl></div></div>`;
+      ${isAdmin() ? row("Code", s.code === "R" ? "R" : "C") + row("Books", String(s.books ?? 1)) + row("Admin note", s.adminNote) : ""}</dl></div></div>`;
 }
 
 function attendance(box, { attendance: a }) {
