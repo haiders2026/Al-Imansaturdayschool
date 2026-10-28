@@ -10,6 +10,10 @@ A web app for running the school: attendance, tests and grades, assignment uploa
 | **Teacher / assistant teacher** | Only the grades they're assigned to (they land on that grade's attendance when they sign in): take attendance (and message absent students' parents), create tests and enter scores, upload assignments, write lesson plans for the admin to review, write notes on students, share to the class WhatsApp group |
 | **Parent** | Their own children only: attendance, grades, assignments to download, teacher comments that were marked "share with parents", fee balance, join-group button for the class WhatsApp |
 
+**Online registration:** families fill in the form at `/register` (no login), for new children or for next year. The admin checks each one under **Registrations**, picks the class and number of books, and the children are added to Students. Returning children are matched to their existing record instead of duplicated, and a parent login can be created at the same time. The form can be opened or closed, and can show a message at the top (fees, start date).
+
+**School calendar:** holidays, no-school days, events and exams, for the whole school or one grade. Everyone sees it after signing in, the dashboard warns about a no-school day in the next two weeks, and every event and announcement has a Share on WhatsApp button.
+
 Other bits: announcements, printable report cards and receipts, attendance register, roster with emergency contacts and allergies, birthdays, CSV exports everywhere, spreadsheet import with column matching, full backup/restore, works on phones (can be added to the home screen).
 
 **WhatsApp:** WhatsApp doesn't let websites create groups or send messages by themselves. You make one group per grade in WhatsApp, paste its invite link into the app, and the app then gives you one-tap buttons that open WhatsApp with the message already written (invites, absence notices, fee reminders, receipts, new assignments).
@@ -22,6 +26,8 @@ Other bits: announcements, printable report cards and receipts, attendance regis
 4. Optional but recommended: in **Site configuration → Environment variables**, add `JWT_SECRET` set to a long random string, then redeploy.
 5. Open the site. The first visit asks you to create the admin account.
 6. Go to **Settings & Import → Import students** and load the starter file (`al-iman-starter.json`) you were given, or upload a spreadsheet.
+
+**Your own web address:** buy the domain (for example from Netlify, Namecheap or GoDaddy), then in Netlify go to **Domain management → Add a domain** and follow the steps. Netlify switches on HTTPS by itself. The registration link becomes `https://your-domain/register`.
 
 **Fees:** the yearly fee is a base fee ($150) plus a fee per book ($25). Every student takes 1 book unless you change it (Payments → By student, or the student's Edit form). Both amounts are in Settings.
 

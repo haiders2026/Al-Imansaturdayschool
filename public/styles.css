@@ -174,3 +174,31 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .modal { box-shadow: none; max-height: none; width: 100%; padding: 0; }
   body.printing-modal #app { display: none; }
 }
+
+/* Registration form */
+.reg-page { min-height: 100vh; padding: 28px 16px 48px; }
+.reg-card { max-width: 760px; margin: 0 auto; padding: 24px; }
+.reg-brand { color: var(--green-dark); padding: 0 0 14px; font-size: 1.2rem; }
+.reg-note { background: var(--amber-soft); border-radius: 10px; padding: 12px 14px; margin: 12px 0 16px; }
+.reg-kid { border-bottom: 1px dashed var(--line); margin-bottom: 12px; }
+.reg-hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+/* Calendar */
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.cal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.cal .dow { background: #f2f5f3; font-size: .75rem; font-weight: 700; text-transform: uppercase; color: #4f5a54; padding: 6px; text-align: center; }
+.cal .day { min-height: 92px; border-top: 1px solid var(--line); border-left: 1px solid var(--line); padding: 4px; font-size: .8rem; }
+.cal .day:nth-child(7n+1) { border-left: 0; }
+.cal .day.other { background: #fafbfa; color: #aab3ae; }
+.cal .day.sat { background: #f6fbf8; }
+.cal .day.today .num { background: var(--green); color: #fff; border-radius: 999px; padding: 0 6px; }
+.cal .num { font-weight: 700; display: inline-block; margin-bottom: 2px; }
+.cal .ev { display: block; width: 100%; text-align: left; border: 0; font: inherit; font-size: .75rem; border-radius: 5px; padding: 2px 5px; margin-top: 2px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: var(--blue-soft); color: var(--blue); }
+.ev.noschool { background: var(--red-soft); color: var(--red); }
+.ev.exam { background: var(--amber-soft); color: var(--amber); }
+.ev.event { background: var(--green-soft); color: var(--green); }
+.ev-date { min-width: 56px; text-align: center; border-radius: 8px; padding: 4px; font-weight: 700; line-height: 1.1; }
+.ev-date small { display: block; font-size: .7rem; font-weight: 600; text-transform: uppercase; }
+.banner { border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; font-weight: 600; }
+.banner.red { background: var(--red-soft); color: var(--red); border: 1px solid #e6b6b0; }
+@media (max-width: 640px) { .cal .day { min-height: 64px; } .cal .ev { font-size: 0; height: 6px; padding: 0; } }

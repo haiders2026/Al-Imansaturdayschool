@@ -22,6 +22,8 @@ const DEFAULT_SETTINGS = {
   passMark: 60,
   contactPhone: "",
   countryCode: "1",
+  registrationOpen: true,
+  registrationNote: "",
 };
 
 // Fee settings are office business; everyone else gets the rest.
@@ -699,6 +701,138 @@ route("DELETE", "/announcements/:id", async ({ user, params }) => {
   return { ok: true };
 });
 
+// School calendar: holidays, no-school days, events and exams.
+const EVENT_TYPES = ["noschool", "event", "exam", "other"];
+route("GET", "/events", async ({ user }) => {
+  const list = (await all("events")).sort((a, b) => a.date.localeCompare(b.date));
+  if (user.role === "admin") return list;
+  const classIds = (await visibleClasses(user)).map((c) => c.id);
+  return list.filter((e) => !e.classId || classIds.includes(e.classId));
+});
+route("POST", "/events", async ({ user, body }) => {
+  requireRole(user, "admin", "teacher");
+  const existing = body.id ? await findById("events", body.id) : null;
+  if (body.id && !existing) fail(404, "Event not found.");
+  if (existing && user.role !== "admin" && existing.authorId !== user.id) fail(403, "You can only change your own events.");
+  if (body.classId) await assertClassAccess(user, body.classId, { write: true });
+  else requireRole(user, "admin");
+  if (!body.title) fail(400, "Give the event a title.");
+  const isDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || "");
+  if (!isDate(body.date)) fail(400, "Pick a date.");
+  if (body.endDate && (!isDate(body.endDate) || body.endDate < body.date)) fail(400, "The end date must be on or after the start date.");
+  const record = { ...pick(body, ["id", "title", "date", "endDate", "time", "details", "classId"]), type: EVENT_TYPES.includes(body.type) ? body.type : "event" };
+  if (!existing) { record.authorId = user.id; record.authorName = user.name; }
+  return upsert("events", record);
+});
+route("DELETE", "/events/:id", async ({ user, params }) => {
+  const e = await findById("events", params.id);
+  if (!e) fail(404, "Event not found.");
+  if (user.role !== "admin" && e.authorId !== user.id) fail(403, "You can only delete your own events.");
+  await remove("events", params.id);
+  return { ok: true };
+});
+
+// Online registration: families fill in a public form; the admin reviews and approves it.
+const REG_FAMILY_FIELDS = [
+  "fatherName", "fatherPhone", "fatherEmail", "motherName", "motherPhone", "motherEmail",
+  "guardianName", "guardianPhone", "address", "emergencyContact", "emergencyPhone", "pickupAuthorized", "comments",
+];
+const REG_CHILD_FIELDS = ["firstName", "lastName", "gender", "dob", "grade", "returning", "medical", "allergies"];
+const MAX_PENDING_REGISTRATIONS = 300;
+const clip = (obj, keys) => Object.fromEntries(keys.filter((k) => obj?.[k] !== undefined && obj[k] !== "").map((k) => [k, typeof obj[k] === "boolean" ? obj[k] : String(obj[k]).trim().slice(0, 500)]));
+const digits = (v) => String(v || "").replace(/\D/g, "");
+
+route("GET", "/register/info", async () => {
+  const settings = await getSettings();
+  const grades = (await all("classes")).sort((a, b) => (a.order ?? 99) - (b.order ?? 99) || a.name.localeCompare(b.name)).map((c) => c.name);
+  return {
+    ...pick(settings, ["schoolName", "academicYear", "registrationNote", "contactPhone"]),
+    open: settings.registrationOpen !== false,
+    grades,
+  };
+}, { auth: false });
+
+route("POST", "/register", async ({ body }) => {
+  const settings = await getSettings();
+  if (settings.registrationOpen === false) fail(400, "Registration is closed right now. Please contact the school office.");
+  if (body.website) return { ok: true, ref: "OK" }; // hidden field only bots fill in
+  const family = clip(body.family, REG_FAMILY_FIELDS);
+  const children = (Array.isArray(body.children) ? body.children : []).slice(0, 8).map((c) => clip(c, REG_CHILD_FIELDS)).filter((c) => c.firstName);
+  if (!children.length) fail(400, "Add at least one child.");
+  if (children.some((c) => !c.lastName || !c.grade)) fail(400, "Each child needs a last name and a grade.");
+  if (!(family.fatherName || family.motherName || family.guardianName)) fail(400, "Enter at least one parent's name.");
+  if (![family.fatherPhone, family.motherPhone, family.guardianPhone].some((p) => digits(p).length >= 7)) fail(400, "Enter at least one parent phone number.");
+  if (!body.agree) fail(400, "Please tick the box to confirm the details are correct.");
+  const regs = await all("registrations");
+  if (regs.filter((r) => r.status === "pending").length >= MAX_PENDING_REGISTRATIONS) fail(429, "We can't take more registrations online right now. Please contact the school office.");
+  const rec = await upsert("registrations", {
+    status: "pending", academicYear: settings.academicYear, family, children,
+    photoConsent: body.photoConsent === true, ref: Math.random().toString(36).slice(2, 8).toUpperCase(),
+  });
+  return { ok: true, ref: rec.ref };
+}, { auth: false });
+
+route("GET", "/registrations", async ({ user }) => {
+  requireRole(user, "admin");
+  const students = await all("students");
+  return (await all("registrations")).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((r) => ({
+    ...r,
+    children: r.children.map((c) => ({ ...c, matchId: matchStudent(students, r.family, c)?.id || "" })),
+  }));
+});
+
+// A returning child is the same first + last name in the same family (shared parent phone).
+function matchStudent(students, family, child) {
+  const phones = [family.fatherPhone, family.motherPhone, family.guardianPhone].map(digits).filter(Boolean);
+  const same = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
+  return students.find((s) => same(s.firstName, child.firstName) && same(s.lastName, child.lastName) &&
+    [s.fatherPhone, s.motherPhone, s.guardianPhone].map(digits).some((p) => p && phones.includes(p)));
+}
+
+route("POST", "/registrations/:id/approve", async ({ user, params, body }) => {
+  requireRole(user, "admin");
+  const reg = await findById("registrations", params.id);
+  if (!reg) fail(404, "Registration not found.");
+  if (reg.status === "approved") fail(400, "This registration was already approved.");
+  const classes = await all("classes");
+  const students = await all("students");
+  const choices = Array.isArray(body.children) ? body.children : [];
+  const studentIds = [];
+  for (const [i, child] of reg.children.entries()) {
+    const choice = choices[i] || {};
+    if (choice.skip) continue;
+    if (!classes.some((c) => c.id === choice.classId)) fail(400, `Pick a class for ${child.firstName}.`);
+    const record = cleanFeeFields({
+      ...pick(reg.family, REG_FAMILY_FIELDS.filter((k) => k !== "comments")),
+      ...pick(child, ["firstName", "lastName", "gender", "dob", "medical", "allergies"]),
+      photoConsent: reg.photoConsent === true,
+      classId: choice.classId,
+      books: choice.books ?? 1,
+      active: true,
+    });
+    const existing = matchStudent(students, reg.family, child);
+    const saved = await upsert("students", existing ? { ...record, id: existing.id } : { ...record, enrolledOn: new Date().toISOString().slice(0, 10) });
+    studentIds.push(saved.id);
+  }
+  if (!studentIds.length) fail(400, "Pick at least one child to add.");
+  let logins = [];
+  if (body.createParentLogin) logins = (await routeFor("POST", "/users/parents/generate").handler({ user, body: { studentIds } })).created;
+  await upsert("registrations", { ...reg, status: "approved", studentIds, reviewedBy: user.name, reviewedAt: new Date().toISOString() });
+  return { studentIds, logins };
+});
+route("POST", "/registrations/:id/status", async ({ user, params, body }) => {
+  requireRole(user, "admin");
+  const reg = await findById("registrations", params.id);
+  if (!reg) fail(404, "Registration not found.");
+  if (!["pending", "declined"].includes(body.status)) fail(400, "Unknown status.");
+  return upsert("registrations", { ...reg, status: body.status, reviewedBy: user.name, reviewedAt: new Date().toISOString() });
+});
+route("DELETE", "/registrations/:id", async ({ user, params }) => {
+  requireRole(user, "admin");
+  await remove("registrations", params.id);
+  return { ok: true };
+});
+
 // Dashboard numbers
 route("GET", "/dashboard", async ({ user }) => {
   const students = (await visibleStudents(user)).filter((s) => s.active !== false);
@@ -728,6 +862,7 @@ route("GET", "/dashboard", async ({ user }) => {
     out.noTeacher = classes.filter((c) => !(c.teacherIds || []).length).map((c) => c.name);
     out.noWhatsapp = classes.filter((c) => !c.whatsappLink).map((c) => c.name);
     out.plansWaiting = (await all("lessonplans")).filter((p) => p.status === "submitted").length;
+    out.registrationsWaiting = (await all("registrations")).filter((r) => r.status === "pending").length;
   }
   return out;
 });
@@ -791,7 +926,7 @@ route("POST", "/seed", async ({ user, body }) => {
 });
 
 // Backup & restore (admin)
-const BACKUP_COLLECTIONS = ["users", "classes", "students", "tests", "assignments", "lessonplans", "notes", "payments", "announcements"];
+const BACKUP_COLLECTIONS = ["users", "classes", "students", "tests", "assignments", "lessonplans", "notes", "payments", "announcements", "events", "registrations"];
 route("GET", "/backup", async ({ user }) => {
   requireRole(user, "admin");
   const store = await db();
