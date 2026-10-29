@@ -1,4 +1,4 @@
-import { state, api, esc, fmtDate, fmtMoney, isAdmin, isParent, isStaff, studentName, className, classOptions, modal, onSubmit, toast, confirmBox, emptyState, waShare } from "../core.js";
+import { state, api, esc, fmtDate, fmtMoney, isAdmin, isParent, isStaff, can, studentName, className, classOptions, modal, onSubmit, toast, confirmBox, emptyState, waShare } from "../core.js";
 import { upcomingEvents, eventRow, wireEvents, whenText } from "./calendar.js";
 
 export async function render(page) {
@@ -17,12 +17,12 @@ export async function render(page) {
       ${stat("Students", dash.studentCount, `${dash.classCount} grades/classes`)}
       ${stat("Teachers", dash.teacherCount, "")}
       ${dash.lastDay ? stat("Last attendance", `${dash.lastDay.present} present`, `${dash.lastDay.absent} absent · ${fmtDate(dash.lastDay.date)}`) : stat("Last attendance", "None yet", "")}
-      ${stat("Fees collected", fmtMoney(f.paid), `of ${fmtMoney(f.fee)} expected`)}
-      ${stat("Outstanding", fmtMoney(f.balance), `${f.unpaidCount} students owe`)}
+      ${f ? stat("Fees collected", fmtMoney(f.paid), `of ${fmtMoney(f.fee)} expected`) : ""}
+      ${f ? stat("Outstanding", fmtMoney(f.balance), `${f.unpaidCount} students owe`) : ""}
       ${dash.registrationsWaiting ? `<a href="#/registrations" style="text-decoration:none;color:inherit">${stat("Registrations", `${dash.registrationsWaiting} new`, "to review")}</a>` : ""}
       ${dash.plansWaiting ? `<a href="#/lessonplans" style="text-decoration:none;color:inherit">${stat("Lesson plans", `${dash.plansWaiting} to review`, "from teachers")}</a>` : ""}
     </div>
-    ${setupWarnings(dash)}`;
+    ${can("settings") ? setupWarnings(dash) : ""}`;
   } else if (isParent()) {
     const kids = state.students;
     const profiles = await Promise.all(kids.map((k) => api("GET", `/students/${k.id}/profile`)));
@@ -78,9 +78,9 @@ function annItem(a) {
 function teacherClassCard(c) {
   return `<div class="card"><h2>${esc(c.name)}</h2><p class="muted">${c.studentCount} students${c.room ? ` · Room ${esc(c.room)}` : ""}</p>
     <div class="btn-row">
-      <a class="btn sm" href="#/attendance/${c.id}">Take attendance</a>
-      <a class="btn sm secondary" href="#/grades/${c.id}">Grades</a>
-      <a class="btn sm secondary" href="#/assignments/${c.id}">Assignments</a>
+      ${can("attendance") ? `<a class="btn sm" href="#/attendance/${c.id}">Take attendance</a>` : ""}
+      ${can("grades") ? `<a class="btn sm secondary" href="#/grades/${c.id}">Grades</a>` : ""}
+      ${can("assignments") ? `<a class="btn sm secondary" href="#/assignments/${c.id}">Assignments</a>` : ""}
       ${c.whatsappLink ? `<a class="btn sm wa" href="${esc(c.whatsappLink)}" target="_blank" rel="noopener">WhatsApp group</a>` : ""}
     </div></div>`;
 }

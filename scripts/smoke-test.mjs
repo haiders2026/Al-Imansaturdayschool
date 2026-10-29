@@ -188,9 +188,57 @@ await call("POST", "/register", { family, agree: true, children: [{ firstName: "
 token = adminToken;
 await call("PUT", "/settings", { registrationOpen: true });
 
+// Documents
+token = adminToken;
+const pdf = (text) => ({ name: "doc.pdf", type: "application/pdf", data: Buffer.from(`%PDF ${text}`).toString("base64") });
+const docAll = await call("POST", "/documents", { title: "Handbook", category: "Policies", audience: "all", file: pdf("handbook") });
+const docStaff = await call("POST", "/documents", { title: "Staff rota", audience: "staff", file: pdf("rota") });
+await call("POST", "/documents", { title: "Board minutes", audience: "admin", file: pdf("minutes") });
+await call("POST", "/documents", { title: "No file", audience: "all" }, 400);
+if (other) await call("POST", "/documents", { title: "Other grade trip form", audience: "class", classId: other.id, file: pdf("trip") });
+token = (await call("POST", "/auth/login", { username: "tt", password: "teacherpass" })).token;
+const myDoc = await call("POST", "/documents", { title: "Grade reading list", audience: "class", classId: cls.id, file: pdf("reading") });
+await call("POST", "/documents", { title: "Whole school", audience: "all", file: pdf("x") }, 403);
+ok((await call("GET", "/documents")).map((d) => d.title).sort().join() === "Grade reading list,Handbook,Staff rota", "teacher sees school, staff and own-grade documents only");
+await call("DELETE", `/documents/${docAll.id}`, null, 403);
+token = (await call("POST", "/auth/login", { username: fam.username, password: fam.tempPassword })).token;
+ok((await call("GET", "/documents")).map((d) => d.title).sort().join() === "Grade reading list,Handbook", "parent sees everyone and own-grade documents only");
+ok((await call("GET", `/documents/${myDoc.id}/file`)).startsWith("%PDF reading"), "parent opens their grade's PDF");
+await call("GET", `/documents/${docStaff.id}/file`, null, 404);
+await call("POST", "/documents", { title: "x", audience: "class", classId: cls.id, file: pdf("x") }, 403);
+ok(true, "parent can't open staff documents or upload");
+
+// Per-person module access
+token = adminToken;
+await call("POST", "/users", { id: t.user.id, name: "Teacher T", username: "tt", role: "teacher", modules: ["attendance", "students"] });
+token = (await call("POST", "/auth/login", { username: "tt", password: "teacherpass" })).token;
+ok((await call("GET", "/auth/me")).user.access.join() === "attendance,students", "teacher's access shows only the ticked modules");
+await call("GET", `/attendance?classId=${cls.id}&date=2026-11-07`);
+await call("GET", "/tests", null, 403);
+await call("GET", "/documents", null, 403);
+await call("POST", "/notes", { studentId: kids[0].id, text: "x" }, 403);
+ok(true, "teacher can use attendance but not grades, documents or notes once those are switched off");
+token = adminToken;
+await call("POST", "/users", { id: t.user.id, name: "Teacher T", username: "tt", role: "teacher", modules: ["attendance", "grades", "assignments", "lessonplans", "students", "notes", "reports", "calendar", "documents", "classes", "payments"] });
+ok((await call("GET", "/users")).find((u) => u.id === t.user.id).modules === null, "ticking everything gives a teacher the normal access back (office modules ignored)");
+const office = await call("POST", "/users", { name: "Office", username: "office", role: "admin", password: "officepass1", modules: ["payments"] });
+token = (await call("POST", "/auth/login", { username: "office", password: "officepass1" })).token;
+await call("GET", "/payments/summary");
+await call("GET", "/registrations", null, 403);
+await call("GET", "/users", null, 403);
+await call("POST", "/users", { id: office.user.id, name: "Office", username: "office", role: "admin", modules: null }, 403);
+await call("PUT", "/settings", { defaultFee: 1 }, 403);
+await call("GET", "/backup", null, 403);
+const officeDash = await call("GET", "/dashboard");
+ok(officeDash.finance && officeDash.registrationsWaiting === undefined, "office login with only Payments can take payments but not registrations, staff, settings or backups");
+token = adminToken;
+const me = await call("GET", "/auth/me");
+await call("POST", "/users", { id: me.user.id, name: me.user.name, username: me.user.username, role: "teacher", active: false, modules: [] });
+ok((await call("GET", "/auth/me")).user.access.includes("users"), "an admin can't lock themselves out");
+
 token = adminToken;
 const backup = await call("GET", "/backup");
-ok(backup.students.length === students.length + 2 && backup.attendance.length > 0 && backup.events.length && backup.registrations.length === 2, "backup includes data, calendar and registrations");
+ok(backup.students.length === students.length + 2 && backup.attendance.length > 0 && backup.events.length && backup.registrations.length === 2 && backup.documents.length >= 4, "backup includes data, calendar and registrations");
 await call("POST", "/auth/password", { current: "password123", next: "newpassword1" });
 await call("GET", "/auth/me", null, 401);
 ok(true, "old token stops working after password change");
