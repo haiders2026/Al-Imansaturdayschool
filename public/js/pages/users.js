@@ -1,4 +1,4 @@
-import { state, api, esc, studentName, className, toast, emptyState, modal, onSubmit, confirmBox, waChat, download, toCSV } from "../core.js";
+import { state, api, esc, appInviteLine, studentName, className, toast, emptyState, modal, onSubmit, confirmBox, waChat, download, toCSV } from "../core.js";
 
 const ROLE_LABEL = { admin: "Admin / office", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" };
 
@@ -43,7 +43,7 @@ export async function render(page, [tab = "staff"]) {
   });
 }
 
-const loginMessage = (c) => `As-salamu alaykum ${c.name}! You can now follow your child's attendance, grades, assignments and teacher comments at ${location.origin}\n\nUsername: ${c.username}\nPassword: ${c.tempPassword}\n\nPlease change your password after signing in. — ${state.settings.schoolName}`;
+const loginMessage = (c) => `As-salamu alaykum ${c.name}! ${appInviteLine()}\n\nUsername: ${c.username}\nPassword: ${c.tempPassword}\n\nPlease change your password after signing in. — ${state.settings.schoolName}`;
 
 function showCredentials(list) {
   const { el } = modal({

@@ -1,4 +1,4 @@
-import { state, api, esc, fmtDate, toast, emptyState, modal, confirmBox, loadCommon, waChat, studentName, onSubmit } from "../core.js";
+import { state, api, esc, appInviteLine, fmtDate, toast, emptyState, modal, confirmBox, loadCommon, waChat, studentName, onSubmit } from "../core.js";
 
 const STATUS = { pending: ["New", "amber"], approved: ["Added", "green"], declined: ["Declined", "red"] };
 const regLink = () => `${location.origin}/register`;
@@ -133,13 +133,12 @@ function view(r) {
 }
 
 function showLogins(logins, r) {
-  const signIn = location.origin;
   modal({
     title: "Parent login created",
     body: `<p>Send these details to the family. They can change the password after signing in.</p>
       ${logins.map((l) => {
         const kids = l.studentIds.map((id) => studentName(state.students.find((s) => s.id === id))).join(", ");
-        const msg = `As-salamu alaykum! ${kids} ${l.studentIds.length > 1 ? "are" : "is"} now registered at ${state.settings.schoolName}.\n\nSign in to see attendance, grades and school news:\n${signIn}\nUsername: ${l.username}\nPassword: ${l.tempPassword}`;
+        const msg = `As-salamu alaykum! ${kids} ${l.studentIds.length > 1 ? "are" : "is"} now registered at ${state.settings.schoolName}.\n\n${appInviteLine()}\n\nUsername: ${l.username}\nPassword: ${l.tempPassword}`;
         return `<div class="card" style="box-shadow:none"><strong>${esc(l.name)}</strong><div class="small">Username: <code>${esc(l.username)}</code> · Password: <code>${esc(l.tempPassword)}</code></div>
           <div class="btn-row" style="margin-top:8px"><a class="btn wa sm" target="_blank" rel="noopener" href="${esc(waChat(l.username, msg) || waChat(phoneOf(r.family), msg))}">Send on WhatsApp</a></div></div>`;
       }).join("")}
