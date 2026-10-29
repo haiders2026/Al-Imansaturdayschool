@@ -111,6 +111,12 @@ export const waChat = (phone, text = "") => {
   const n = waNumber(phone);
   return n ? `https://wa.me/${n}${text ? `?text=${encodeURIComponent(text)}` : ""}` : "";
 };
+// The "sign in to the app" line in messages to parents. From a teacher it's about their child's
+// classwork; from the office it's a general nudge to read school messages.
+export const appInviteLine = () => (isTeacher()
+  ? `You can now follow your child's attendance, grades, assignments and teacher comments at ${location.origin}`
+  : `Please log in to see important messages from the school at ${location.origin}`);
+
 // Opens WhatsApp with a message ready to send; the user picks the group or person.
 export const waShare = (text) => `https://wa.me/?text=${encodeURIComponent(text)}`;
 

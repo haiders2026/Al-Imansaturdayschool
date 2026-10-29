@@ -1,5 +1,6 @@
 import { state, api, esc, fmtDate, fmtMoney, isAdmin, isParent, isStaff, can, studentName, className, classOptions, modal, onSubmit, toast, confirmBox, emptyState, waShare } from "../core.js";
 import { upcomingEvents, eventRow, wireEvents, whenText } from "./calendar.js";
+import { inboxItem } from "./messages.js";
 
 export async function render(page) {
   const [dash, announcements, events] = await Promise.all([api("GET", "/dashboard"), api("GET", "/announcements"), api("GET", "/events")]);
@@ -25,8 +26,8 @@ export async function render(page) {
     ${can("settings") ? setupWarnings(dash) : ""}`;
   } else if (isParent()) {
     const kids = state.students;
-    const profiles = await Promise.all(kids.map((k) => api("GET", `/students/${k.id}/profile`)));
-    top = `<div class="grid cols-2">${profiles.map(childCard).join("") || `<div class="card">${emptyState("No children are linked to your login yet. Please contact the school office.")}</div>`}</div>`;
+    const [profiles, messages] = await Promise.all([Promise.all(kids.map((k) => api("GET", `/students/${k.id}/profile`))), api("GET", "/messages")]);
+    top = `${messages.length ? `<div class="card"><h2>Messages from the school</h2>${messages.slice(0, 3).map(inboxItem).join("")}${messages.length > 3 ? `<p><a href="#/messages">All messages →</a></p>` : ""}</div>` : ""}<div class="grid cols-2">${profiles.map(childCard).join("") || `<div class="card">${emptyState("No children are linked to your login yet. Please contact the school office.")}</div>`}</div>`;
   } else {
     top = `<div class="stats">${stat("My students", dash.studentCount, `${dash.classCount} class(es)`)}
       ${dash.lastDay ? stat("Last attendance", `${dash.lastDay.present} present`, `${dash.lastDay.absent} absent · ${fmtDate(dash.lastDay.date)}`) : stat("Last attendance", "None yet", "")}</div>

@@ -1,4 +1,4 @@
-import { state, api, esc, studentName, className, toast, emptyState, modal, onSubmit, confirmBox, waChat, download, toCSV } from "../core.js";
+import { state, api, esc, appInviteLine, studentName, className, toast, emptyState, modal, onSubmit, confirmBox, waChat, download, toCSV } from "../core.js";
 
 const ROLE_LABEL = { admin: "Admin / office", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" };
 
@@ -6,7 +6,8 @@ const ROLE_LABEL = { admin: "Admin / office", teacher: "Teacher", assistant: "As
 const MODULES = {
   attendance: "Attendance", grades: "Tests & grades", assignments: "Assignments", lessonplans: "Lesson plans",
   students: "Students", notes: "Teacher notes", reports: "Reports", calendar: "Calendar (add events)",
-  documents: "Documents", classes: "Grades & WhatsApp", payments: "Payments", registrations: "Registrations",
+  documents: "Documents", classes: "Grades & WhatsApp", messages: "Messages to parents", mynotes: "My notes",
+  payments: "Payments", registrations: "Registrations",
 };
 const OFFICE = ["payments", "registrations"];
 const modulesFor = (role) => Object.keys(MODULES).filter((m) => role === "admin" || !OFFICE.includes(m));
@@ -43,7 +44,7 @@ export async function render(page, [tab = "staff"]) {
   });
 }
 
-const loginMessage = (c) => `As-salamu alaykum ${c.name}! You can now follow your child's attendance, grades, assignments and teacher comments at ${location.origin}\n\nUsername: ${c.username}\nPassword: ${c.tempPassword}\n\nPlease change your password after signing in. — ${state.settings.schoolName}`;
+const loginMessage = (c) => `As-salamu alaykum ${c.name}! ${appInviteLine()}\n\nUsername: ${c.username}\nPassword: ${c.tempPassword}\n\nPlease change your password after signing in. — ${state.settings.schoolName}`;
 
 function showCredentials(list) {
   const { el } = modal({

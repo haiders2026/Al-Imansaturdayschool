@@ -14,6 +14,10 @@ A web app for running the school: attendance, tests and grades, assignment uploa
 
 **School calendar:** holidays, no-school days, events and exams, for the whole school or one grade. Everyone sees it after signing in, the dashboard warns about a no-school day in the next two weeks, and every event and announcement has a Share on WhatsApp button.
 
+**Messages:** admins write announcements, reminders, fee notices or login details and choose who gets them (all parents, chosen grades, chosen families, or staff). Teachers and assistants write their own messages to their class's parents (homework, upcoming test, absence, behaviour, praise, events…), starting from a ready-made text they can change. `{parent}` and `{child}` are filled in for each family. Every message is saved so parents can read it when they log in, and the app gives one WhatsApp button per family plus a "post in class group" button.
+
+**My notes:** each teacher's private notebook (lesson ideas, to-dos, follow-ups), with labels, pinning and search. Nobody else sees them in the app.
+
 **Documents:** upload PDFs (forms, policies, newsletters…) and choose who sees each one: everyone, staff only, admins only, or one grade's teachers and parents. Teachers can share files with their own grade.
 
 **Module access:** under **Staff & Logins → Edit**, tick which parts of the app each person can use. Teachers and assistants can be limited to, say, attendance only. An *Admin / office* login can be limited to chosen modules (for example only Payments). Staff logins, settings and backups are for full admins only, and you can never lock yourself out.
