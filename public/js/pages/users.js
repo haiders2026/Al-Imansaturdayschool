@@ -6,7 +6,8 @@ const ROLE_LABEL = { admin: "Admin / office", teacher: "Teacher", assistant: "As
 const MODULES = {
   attendance: "Attendance", grades: "Tests & grades", assignments: "Assignments", lessonplans: "Lesson plans",
   students: "Students", notes: "Teacher notes", reports: "Reports", calendar: "Calendar (add events)",
-  documents: "Documents", classes: "Grades & WhatsApp", payments: "Payments", registrations: "Registrations",
+  documents: "Documents", classes: "Grades & WhatsApp", messages: "Messages to parents", mynotes: "My notes",
+  payments: "Payments", registrations: "Registrations",
 };
 const OFFICE = ["payments", "registrations"];
 const modulesFor = (role) => Object.keys(MODULES).filter((m) => role === "admin" || !OFFICE.includes(m));

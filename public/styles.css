@@ -207,3 +207,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .report-head { display: flex; flex-wrap: wrap; gap: 10px 28px; padding: 12px 14px; margin-bottom: 14px; background: #f6faf8; border: 1px solid var(--line); border-radius: 10px; }
 .report-head div { display: flex; flex-direction: column; }
 tfoot td { background: #fafbfa; border-top: 1px solid var(--line); }
+
+/* Messages & my notes */
+.check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+.check-list { max-height: 240px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+.check-list .check { padding: 3px 0; }
+.mynote-text { max-height: 9.5em; overflow: hidden; }
+.mynote:hover { border-color: var(--green); }

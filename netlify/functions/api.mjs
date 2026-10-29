@@ -59,7 +59,7 @@ function requireRole(user, ...roles) {
 
 // Modules the admin can switch on or off per staff member. Staff logins and settings are never
 // grantable: only full admins (no module list) can use them.
-const TEACHING_MODULES = ["attendance", "grades", "assignments", "lessonplans", "students", "notes", "reports", "calendar", "documents", "classes"];
+const TEACHING_MODULES = ["attendance", "grades", "assignments", "lessonplans", "students", "notes", "reports", "calendar", "documents", "classes", "messages", "mynotes"];
 const OFFICE_MODULES = ["payments", "registrations"];
 const grantable = (role) => (role === "admin" ? [...TEACHING_MODULES, ...OFFICE_MODULES] : isTeaching({ role }) ? TEACHING_MODULES : []);
 function modulesOf(user) {
@@ -86,6 +86,9 @@ const GATES = [
   [/^\/events/, /POST|PUT|DELETE/, ["calendar"]],
   [/^\/documents/, null, ["documents"]],
   [/^\/classes/, /POST|PUT|DELETE/, ["classes"]],
+  [/^\/messages\/logins/, null, ["users"]],
+  [/^\/messages/, null, ["messages"]],
+  [/^\/mynotes/, null, ["mynotes"]],
   [/^\/users/, null, ["users"]],
   [/^\/(seed|backup|restore)\b/, null, ["settings"]],
   [/^\/settings/, /PUT/, ["settings"]],
@@ -920,6 +923,99 @@ route("GET", "/documents/:id/file", async ({ user, params }) => {
   return sendFile(`doc:${d.id}`, { inline: true });
 });
 
+// Messages: admins broadcast to any parents or staff they pick; teachers write to their own class's
+// parents. Each message is kept so parents (and staff it was sent to) can read it in the app, and
+// the sender gets one-tap WhatsApp buttons per family. {parent} and {child} are filled in per family.
+const MESSAGE_TYPES = ["general", "announcement", "reminder", "homework", "test", "absence", "behaviour", "praise", "event", "closure", "fees", "login"];
+const familyPhone = (s) => String(s.fatherPhone || s.motherPhone || s.guardianPhone || "").replace(/\D/g, "");
+
+route("GET", "/messages", async ({ user }) => {
+  const list = (await all("messages")).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (user.role === "parent") {
+    const mine = user.studentIds || [];
+    return list.filter((m) => m.inApp !== false && (m.studentIds || []).some((id) => mine.includes(id)))
+      .map(({ studentIds, userIds, ...m }) => ({ ...m, studentIds: studentIds.filter((id) => mine.includes(id)) }));
+  }
+  if (user.role === "admin") return list;
+  return list.filter((m) => m.authorId === user.id || (m.userIds || []).includes(user.id));
+});
+route("POST", "/messages", async ({ user, body }) => {
+  requireRole(user, "admin", "teacher");
+  if (!String(body.body || "").trim()) fail(400, "Write the message first.");
+  const studentIds = [...new Set(Array.isArray(body.studentIds) ? body.studentIds : [])];
+  let userIds = [...new Set(Array.isArray(body.userIds) ? body.userIds : [])];
+  if (user.role !== "admin") {
+    // Teachers write only to parents of their own students.
+    const mine = (await visibleStudents(user)).map((s) => s.id);
+    if (studentIds.some((id) => !mine.includes(id))) fail(403, "You can only message parents of your own class.");
+    userIds = [];
+  } else {
+    const staff = (await all("users")).filter((u) => u.role !== "parent").map((u) => u.id);
+    userIds = userIds.filter((id) => staff.includes(id));
+  }
+  if (!studentIds.length && !userIds.length) fail(400, "Choose who to send it to.");
+  return upsert("messages", {
+    type: MESSAGE_TYPES.includes(body.type) ? body.type : "general",
+    subject: String(body.subject || "").slice(0, 200),
+    body: String(body.body).slice(0, 4000),
+    studentIds, userIds,
+    inApp: body.inApp !== false,
+    authorId: user.id, authorName: user.name, authorRole: user.role,
+  });
+});
+route("DELETE", "/messages/:id", async ({ user, params }) => {
+  const m = await findById("messages", params.id);
+  if (!m) fail(404, "Message not found.");
+  if (user.role !== "admin" && m.authorId !== user.id) fail(403, "You can only delete messages you sent.");
+  await remove("messages", m.id);
+  return { ok: true };
+});
+// Login details for chosen families: new logins are created, and existing ones get a new password if asked.
+route("POST", "/messages/logins", async ({ user, body }) => {
+  requireRole(user, "admin");
+  const ids = Array.isArray(body.studentIds) ? body.studentIds : [];
+  if (!ids.length) fail(400, "Choose at least one family.");
+  const { created } = await routeFor("POST", "/users/parents/generate").handler({ user, body: { studentIds: ids } });
+  const students = await all("students");
+  const phones = new Set(students.filter((s) => ids.includes(s.id)).map(familyPhone).filter(Boolean));
+  const users = await all("users");
+  const out = created.map((c) => ({ ...c, isNew: true }));
+  for (const u of users) {
+    if (u.role !== "parent" || !phones.has(u.username) || out.some((c) => c.username === u.username)) continue;
+    if (body.reset) {
+      const tempPassword = randomPassword();
+      u.passHash = hashPassword(tempPassword);
+      u.tokenVersion = (u.tokenVersion || 0) + 1;
+      out.push({ name: u.name, username: u.username, tempPassword, studentIds: u.studentIds || [] });
+    } else {
+      out.push({ name: u.name, username: u.username, tempPassword: "", studentIds: u.studentIds || [] });
+    }
+  }
+  if (body.reset) await saveAll("users", users);
+  const noPhone = students.filter((s) => ids.includes(s.id) && !familyPhone(s)).map((s) => `${s.firstName} ${s.lastName || ""}`.trim());
+  return { logins: out, noPhone };
+});
+
+// My notes: a private notebook for each staff member. Nobody else sees them, not even admins.
+route("GET", "/mynotes", async ({ user }) => {
+  requireRole(user, "admin", "teacher");
+  return (await all("mynotes")).filter((n) => n.ownerId === user.id)
+    .sort((a, b) => (b.pinned === true) - (a.pinned === true) || (b.updatedAt || b.createdAt).localeCompare(a.updatedAt || a.createdAt));
+});
+route("POST", "/mynotes", async ({ user, body }) => {
+  requireRole(user, "admin", "teacher");
+  if (!String(body.title || "").trim() && !String(body.text || "").trim()) fail(400, "Write something first.");
+  const existing = body.id ? await findById("mynotes", body.id) : null;
+  if (body.id && (!existing || existing.ownerId !== user.id)) fail(404, "Note not found.");
+  return upsert("mynotes", { ...pick(body, ["id", "title", "text", "classId", "tag"]), pinned: body.pinned === true, ownerId: user.id });
+});
+route("DELETE", "/mynotes/:id", async ({ user, params }) => {
+  const n = await findById("mynotes", params.id);
+  if (!n || n.ownerId !== user.id) fail(404, "Note not found.");
+  await remove("mynotes", n.id);
+  return { ok: true };
+});
+
 // Dashboard numbers
 route("GET", "/dashboard", async ({ user }) => {
   const students = (await visibleStudents(user)).filter((s) => s.active !== false);
@@ -1015,7 +1111,7 @@ route("POST", "/seed", async ({ user, body }) => {
 });
 
 // Backup & restore (admin)
-const BACKUP_COLLECTIONS = ["users", "classes", "students", "tests", "assignments", "lessonplans", "notes", "payments", "announcements", "events", "registrations", "documents"];
+const BACKUP_COLLECTIONS = ["users", "classes", "students", "tests", "assignments", "lessonplans", "notes", "payments", "announcements", "events", "registrations", "documents", "messages", "mynotes"];
 route("GET", "/backup", async ({ user }) => {
   requireRole(user, "admin");
   const store = await db();

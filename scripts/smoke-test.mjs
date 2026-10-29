@@ -208,6 +208,37 @@ await call("GET", `/documents/${docStaff.id}/file`, null, 404);
 await call("POST", "/documents", { title: "x", audience: "class", classId: cls.id, file: pdf("x") }, 403);
 ok(true, "parent can't open staff documents or upload");
 
+// Messages and private notes
+token = (await call("POST", "/auth/login", { username: "tt", password: "teacherpass" })).token;
+const tMsg = await call("POST", "/messages", { type: "homework", body: "As-salamu alaykum {parent}, {child} has homework.", studentIds: kids.map((k) => k.id) });
+ok(tMsg.type === "homework" && tMsg.authorRole === "teacher", "teacher writes a message to their class's parents");
+if (other) await call("POST", "/messages", { body: "hi", studentIds: [students.find((x) => x.classId === other.id).id] }, 403);
+await call("POST", "/messages", { body: "", studentIds: [kids[0].id] }, 400);
+await call("POST", "/messages/logins", { studentIds: [kids[0].id] }, 403);
+const note = await call("POST", "/mynotes", { title: "Lesson idea", text: "Use flashcards", pinned: true });
+ok((await call("GET", "/mynotes")).length === 1, "teacher keeps private notes");
+token = (await call("POST", "/auth/login", { username: "aa", password: "assistpass" })).token;
+ok((await call("GET", "/mynotes")).length === 0, "another teacher can't see them");
+await call("DELETE", `/mynotes/${note.id}`, null, 404);
+ok((await call("GET", "/messages")).length === 0, "assistant only sees messages they sent or were sent");
+token = adminToken;
+ok((await call("GET", "/mynotes")).length === 0, "not even the admin sees a teacher's notes");
+const bMsg = await call("POST", "/messages", { type: "announcement", subject: "Eid party", body: "Join us", studentIds: students.map((x) => x.id), userIds: [t.user.id] });
+await call("POST", "/messages", { body: "WhatsApp only", inApp: false, studentIds: [kids[0].id] });
+const logins = await call("POST", "/messages/logins", { studentIds: [kids[0].id] });
+ok(logins.logins.length === 1 && logins.logins[0].tempPassword === "", "login details for a family that has a login keep their password");
+const reset = await call("POST", "/messages/logins", { studentIds: [kids[0].id], reset: true });
+ok(reset.logins[0].tempPassword.length > 5, "login details can include a new password");
+fam.tempPassword = reset.logins[0].tempPassword;
+token = (await call("POST", "/auth/login", { username: fam.username, password: fam.tempPassword })).token;
+const inbox = await call("GET", "/messages");
+ok(inbox.map((m) => m.id).sort().join() === [tMsg.id, bMsg.id].sort().join() && inbox.every((m) => m.userIds === undefined && m.studentIds.every((id) => fam.studentIds.includes(id))), "parent sees the teacher's and office's messages (not WhatsApp-only ones, and no other families)");
+await call("POST", "/messages", { body: "x", studentIds: [kids[0].id] }, 403);
+await call("GET", "/mynotes", null, 403);
+token = (await call("POST", "/auth/login", { username: "tt", password: "teacherpass" })).token;
+ok((await call("GET", "/messages")).some((m) => m.id === bMsg.id), "staff see messages the office sent to them");
+token = adminToken;
+
 // Per-person module access
 token = adminToken;
 await call("POST", "/users", { id: t.user.id, name: "Teacher T", username: "tt", role: "teacher", modules: ["attendance", "students"] });
@@ -219,7 +250,7 @@ await call("GET", "/documents", null, 403);
 await call("POST", "/notes", { studentId: kids[0].id, text: "x" }, 403);
 ok(true, "teacher can use attendance but not grades, documents or notes once those are switched off");
 token = adminToken;
-await call("POST", "/users", { id: t.user.id, name: "Teacher T", username: "tt", role: "teacher", modules: ["attendance", "grades", "assignments", "lessonplans", "students", "notes", "reports", "calendar", "documents", "classes", "payments"] });
+await call("POST", "/users", { id: t.user.id, name: "Teacher T", username: "tt", role: "teacher", modules: ["attendance", "grades", "assignments", "lessonplans", "students", "notes", "reports", "calendar", "documents", "classes", "messages", "mynotes", "payments"] });
 ok((await call("GET", "/users")).find((u) => u.id === t.user.id).modules === null, "ticking everything gives a teacher the normal access back (office modules ignored)");
 const office = await call("POST", "/users", { name: "Office", username: "office", role: "admin", password: "officepass1", modules: ["payments"] });
 token = (await call("POST", "/auth/login", { username: "office", password: "officepass1" })).token;
