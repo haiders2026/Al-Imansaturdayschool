@@ -57,6 +57,45 @@ function requireRole(user, ...roles) {
   if (!roles.includes(user.role)) fail(403, "You don't have access to this.");
 }
 
+// Modules the admin can switch on or off per staff member. Staff logins and settings are never
+// grantable: only full admins (no module list) can use them.
+const TEACHING_MODULES = ["attendance", "grades", "assignments", "lessonplans", "students", "notes", "reports", "calendar", "documents", "classes"];
+const OFFICE_MODULES = ["payments", "registrations"];
+const grantable = (role) => (role === "admin" ? [...TEACHING_MODULES, ...OFFICE_MODULES] : isTeaching({ role }) ? TEACHING_MODULES : []);
+function modulesOf(user) {
+  if (user.role === "admin" && !Array.isArray(user.modules)) return [...grantable("admin"), "users", "settings"];
+  if (user.role === "parent") return [];
+  return Array.isArray(user.modules) ? user.modules.filter((m) => grantable(user.role).includes(m)) : grantable(user.role);
+}
+const can = (user, mod) => modulesOf(user).includes(mod);
+
+// Which module each staff request belongs to (any one of them is enough). Unlisted requests are open to every role check.
+const GATES = [
+  [/^\/attendance\/report/, null, ["attendance", "reports"]],
+  [/^\/attendance/, null, ["attendance"]],
+  [/^\/(tests|grades)\b/, null, ["grades"]],
+  [/^\/assignments/, null, ["assignments"]],
+  [/^\/lessonplans/, null, ["lessonplans"]],
+  [/^\/notes/, null, ["notes"]],
+  [/^\/students\/import/, null, ["settings"]],
+  [/^\/students\/[^/]+\/books/, null, ["payments"]],
+  [/^\/students\/[^/]+\/profile/, null, ["students", "notes", "attendance", "grades", "payments"]],
+  [/^\/students/, /POST|PUT|DELETE/, ["students"]],
+  [/^\/payments/, null, ["payments"]],
+  [/^\/registrations/, null, ["registrations"]],
+  [/^\/events/, /POST|PUT|DELETE/, ["calendar"]],
+  [/^\/documents/, null, ["documents"]],
+  [/^\/classes/, /POST|PUT|DELETE/, ["classes"]],
+  [/^\/users/, null, ["users"]],
+  [/^\/(seed|backup|restore)\b/, null, ["settings"]],
+  [/^\/settings/, /PUT/, ["settings"]],
+];
+function checkGate(user, method, path) {
+  if (user.role === "parent") return;
+  const gate = GATES.find(([re, methods]) => re.test(path) && (!methods || methods.test(method)));
+  if (gate && !gate[2].some((m) => can(user, m))) fail(403, "You don't have access to this part of the app. Ask the admin to give you access.");
+}
+
 async function teacherClassIds(user) {
   const classes = await all("classes");
   return classes.filter((c) => staffOf(c).includes(user.id)).map((c) => c.id);
@@ -158,12 +197,12 @@ async function saveUpload(id, file) {
   return { name, type, size: buf.length };
 }
 
-async function sendFile(id) {
+async function sendFile(id, { inline = false } = {}) {
   const f = await (await db()).getFile(`file:${id}`);
   if (!f) fail(404, "File not found.");
   return new Response(f.data, { headers: {
     "content-type": f.metadata?.type || "application/octet-stream",
-    "content-disposition": `attachment; filename="${encodeURIComponent(f.metadata?.name || "file")}"`,
+    "content-disposition": `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(f.metadata?.name || "file")}"`,
   } });
 }
 
@@ -222,7 +261,7 @@ route("POST", "/auth/recover", async ({ body }) => {
   return { token: await signToken(saved), user: publicUser(saved), admins: users.filter((u) => u.role === "admin").map((u) => u.username) };
 }, { auth: false });
 
-route("GET", "/auth/me", async ({ user }) => ({ user: publicUser(user), settings: settingsFor(user, await getSettings()) }));
+route("GET", "/auth/me", async ({ user }) => ({ user: { ...publicUser(user), access: modulesOf(user) }, settings: settingsFor(user, await getSettings()) }));
 
 route("POST", "/auth/password", async ({ user, body }) => {
   if (!checkPassword(body.current, user.passHash)) fail(400, "Your current password is wrong.");
@@ -260,6 +299,16 @@ route("POST", "/users", async ({ user, body }) => {
   const users = await all("users");
   if (users.some((u) => u.username === username && u.id !== body.id)) fail(400, "That username is already taken.");
   const record = { ...pick(body, ["id", "name", "role", "phone", "email", "studentIds", "active"]), username };
+  if (body.id === user.id) {
+    // Never let an admin lock themselves out.
+    record.role = "admin";
+    record.active = true;
+  } else if (body.modules !== undefined) {
+    // null = everything for the role (full admin); a list = only those modules.
+    const allowed = grantable(record.role);
+    const list = Array.isArray(body.modules) ? body.modules.filter((m) => allowed.includes(m)) : null;
+    record.modules = list && (record.role === "admin" || list.length < allowed.length) ? list : null;
+  }
   let tempPassword;
   if (!body.id || body.resetPassword) {
     tempPassword = body.password || randomPassword();
@@ -833,6 +882,44 @@ route("DELETE", "/registrations/:id", async ({ user, params }) => {
   return { ok: true };
 });
 
+// Documents: PDFs and other files (forms, policies, newsletters…) shared with everyone, staff, or one grade.
+const DOC_AUDIENCES = ["all", "staff", "admin", "class"];
+async function visibleDocuments(user) {
+  const docs = (await all("documents")).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (user.role === "admin") return docs;
+  const classIds = (await visibleClasses(user)).map((c) => c.id);
+  return docs.filter((d) => d.audience === "all" || (d.audience === "staff" && isTeaching(user)) || (d.audience === "class" && classIds.includes(d.classId)));
+}
+route("GET", "/documents", async ({ user }) => visibleDocuments(user));
+route("POST", "/documents", async ({ user, body }) => {
+  requireRole(user, "admin", "teacher");
+  const existing = body.id ? await findById("documents", body.id) : null;
+  if (body.id && !existing) fail(404, "Document not found.");
+  if (existing && user.role !== "admin" && existing.uploadedById !== user.id) fail(403, "You can only change documents you uploaded.");
+  if (!body.title) fail(400, "Give the document a title.");
+  const audience = DOC_AUDIENCES.includes(body.audience) ? body.audience : "all";
+  if (audience === "class") await assertClassAccess(user, body.classId, { write: true });
+  else if (user.role !== "admin") fail(403, "Teachers can share documents with their own grade only.");
+  if (!existing && !body.file?.data) fail(400, "Choose a file to upload.");
+  const record = { ...pick(body, ["id", "title", "category", "description"]), audience, classId: audience === "class" ? body.classId : "" };
+  if (!existing) { record.id = newId(); record.uploadedBy = user.name; record.uploadedById = user.id; }
+  if (body.file?.data) record.file = await saveUpload(`doc:${record.id}`, body.file);
+  return upsert("documents", record);
+});
+route("DELETE", "/documents/:id", async ({ user, params }) => {
+  const d = await findById("documents", params.id);
+  if (!d) fail(404, "Document not found.");
+  if (user.role !== "admin" && d.uploadedById !== user.id) fail(403, "You can only delete documents you uploaded.");
+  await remove("documents", d.id);
+  await (await db()).del(`file:doc:${d.id}`);
+  return { ok: true };
+});
+route("GET", "/documents/:id/file", async ({ user, params }) => {
+  const d = (await visibleDocuments(user)).find((x) => x.id === params.id);
+  if (!d) fail(404, "Document not found.");
+  return sendFile(`doc:${d.id}`, { inline: true });
+});
+
 // Dashboard numbers
 route("GET", "/dashboard", async ({ user }) => {
   const students = (await visibleStudents(user)).filter((s) => s.active !== false);
@@ -856,13 +943,15 @@ route("GET", "/dashboard", async ({ user }) => {
   const upcoming = assignments.filter((a) => a.dueDate && a.dueDate >= today).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 5);
   const out = { studentCount: students.length, classCount: classes.length, lastDay, upcoming, classes };
   if (user.role === "admin") {
-    const summary = await routeFor("GET", "/payments/summary").handler({ user });
-    out.finance = { ...summary.totals, unpaidCount: summary.rows.filter((r) => r.balance > 0).length };
+    if (can(user, "payments")) {
+      const summary = await routeFor("GET", "/payments/summary").handler({ user });
+      out.finance = { ...summary.totals, unpaidCount: summary.rows.filter((r) => r.balance > 0).length };
+    }
     out.teacherCount = (await all("users")).filter(isTeaching).length;
     out.noTeacher = classes.filter((c) => !(c.teacherIds || []).length).map((c) => c.name);
     out.noWhatsapp = classes.filter((c) => !c.whatsappLink).map((c) => c.name);
     out.plansWaiting = (await all("lessonplans")).filter((p) => p.status === "submitted").length;
-    out.registrationsWaiting = (await all("registrations")).filter((r) => r.status === "pending").length;
+    if (can(user, "registrations")) out.registrationsWaiting = (await all("registrations")).filter((r) => r.status === "pending").length;
   }
   return out;
 });
@@ -926,7 +1015,7 @@ route("POST", "/seed", async ({ user, body }) => {
 });
 
 // Backup & restore (admin)
-const BACKUP_COLLECTIONS = ["users", "classes", "students", "tests", "assignments", "lessonplans", "notes", "payments", "announcements", "events", "registrations"];
+const BACKUP_COLLECTIONS = ["users", "classes", "students", "tests", "assignments", "lessonplans", "notes", "payments", "announcements", "events", "registrations", "documents"];
 route("GET", "/backup", async ({ user }) => {
   requireRole(user, "admin");
   const store = await db();
@@ -973,6 +1062,7 @@ export default async (req) => {
       user = await findById("users", claims.sub);
       if (!user || user.active === false || (user.tokenVersion || 0) !== claims.ver) fail(401, "Please sign in again.");
     }
+    if (user) checkGate(user, req.method, path);
     if (user?.role === "admin" && !migrated) { await runMigrations(); migrated = true; }
     const body = ["POST", "PUT"].includes(req.method) ? await readBody(req) : {};
     const result = await match.handler({ req, url, user, body, params: match.params });

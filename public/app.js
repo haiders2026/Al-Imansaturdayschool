@@ -1,26 +1,31 @@
-import { state, api, setToken, logout, loadCommon, esc, toast, onSubmit } from "./js/core.js";
+import { state, api, setToken, logout, loadCommon, esc, toast, onSubmit, can } from "./js/core.js";
 
 const NAV = [
   { path: "dashboard", label: "Dashboard", ico: "🏠", roles: ["admin", "teacher", "assistant", "parent"] },
   { path: "calendar", label: "Calendar", ico: "📅", roles: ["admin", "teacher", "assistant", "parent"] },
-  { path: "attendance", label: "Attendance", ico: "✅", roles: ["admin", "teacher", "assistant"] },
-  { path: "grades", label: "Tests & Grades", ico: "📝", roles: ["admin", "teacher", "assistant"] },
-  { path: "assignments", label: "Assignments", ico: "📚", roles: ["admin", "teacher", "assistant", "parent"] },
-  { path: "lessonplans", label: "Lesson Plans", ico: "🗂️", roles: ["admin", "teacher", "assistant"] },
-  { path: "students", label: "Students", ico: "👧", roles: ["admin", "teacher", "assistant"] },
-  { path: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", teacherLabel: "My class & WhatsApp", ico: "💬", roles: ["admin", "teacher", "assistant", "parent"] },
-  { path: "notes", label: "Teacher Notes", ico: "🗒️", roles: ["admin", "teacher", "assistant"] },
-  { path: "registrations", label: "Registrations", ico: "✍️", roles: ["admin"] },
-  { path: "payments", label: "Payments", ico: "💳", roles: ["admin"] },
-  { path: "reports", label: "Reports", ico: "📊", roles: ["admin", "teacher", "assistant"] },
-  { path: "users", label: "Staff & Logins", ico: "👥", roles: ["admin"] },
-  { path: "settings", label: "Settings & Import", ico: "⚙️", roles: ["admin"] },
+  { path: "attendance", module: "attendance", label: "Attendance", ico: "✅", roles: ["admin", "teacher", "assistant"] },
+  { path: "grades", module: "grades", label: "Tests & Grades", ico: "📝", roles: ["admin", "teacher", "assistant"] },
+  { path: "assignments", module: "assignments", label: "Assignments", ico: "📚", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "lessonplans", module: "lessonplans", label: "Lesson Plans", ico: "🗂️", roles: ["admin", "teacher", "assistant"] },
+  { path: "students", module: "students", label: "Students", ico: "👧", roles: ["admin", "teacher", "assistant"] },
+  { path: "classes", module: "classes", label: "Grades & WhatsApp", parentLabel: "WhatsApp groups", teacherLabel: "My class & WhatsApp", ico: "💬", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "documents", module: "documents", label: "Documents", ico: "📄", roles: ["admin", "teacher", "assistant", "parent"] },
+  { path: "notes", module: "notes", label: "Teacher Notes", ico: "🗒️", roles: ["admin", "teacher", "assistant"] },
+  { path: "registrations", module: "registrations", label: "Registrations", ico: "✍️", roles: ["admin"] },
+  { path: "payments", module: "payments", label: "Payments", ico: "💳", roles: ["admin"] },
+  { path: "reports", module: "reports", label: "Reports", ico: "📊", roles: ["admin", "teacher", "assistant"] },
+  { path: "users", module: "users", label: "Staff & Logins", ico: "👥", roles: ["admin"] },
+  { path: "settings", module: "settings", label: "Settings & Import", ico: "⚙️", roles: ["admin"] },
 ];
+
+// Parents aren't limited by modules; staff see only the modules the admin gave them.
+const allowed = (n, role) => n.roles.includes(role) && (role === "parent" || !n.module || can(n.module));
 
 const PAGES = {
   dashboard: () => import("./js/pages/dashboard.js"),
   calendar: () => import("./js/pages/calendar.js"),
   registrations: () => import("./js/pages/registrations.js"),
+  documents: () => import("./js/pages/documents.js"),
   attendance: () => import("./js/pages/attendance.js"),
   grades: () => import("./js/pages/grades.js"),
   assignments: () => import("./js/pages/assignments.js"),
@@ -143,7 +148,7 @@ function renderShell() {
   app.innerHTML = `<div class="shell" id="shell">
     <aside class="sidebar">
       ${brand()}
-      <nav class="nav">${NAV.filter((n) => n.roles.includes(role)).map((n) =>
+      <nav class="nav">${NAV.filter((n) => allowed(n, role)).map((n) =>
         `<a href="#/${n.path}" data-path="${n.path}"><span class="ico">${n.ico}</span>${(role === "parent" && n.parentLabel) || (teaching && n.teacherLabel) || n.label}</a>`).join("")}</nav>
       <div class="who">${esc(state.user.name)}<br><span style="opacity:.7">${roleLabel}</span><br>
         ${teaching ? `<span style="opacity:.9">${state.classes.length ? `Your class: <strong>${esc(state.classes.map((c) => c.name).join(", "))}</strong>` : "No class assigned yet"}</span><br>` : ""}
@@ -162,14 +167,14 @@ function renderShell() {
 }
 
 async function route() {
-  if (!location.hash.replace(/^#\/?/, "") && ["teacher", "assistant"].includes(state.user.role) && state.classes.length) {
+  if (!location.hash.replace(/^#\/?/, "") && ["teacher", "assistant"].includes(state.user.role) && state.classes.length && can("attendance")) {
     location.replace("#/attendance");
     return;
   }
   const [name = "dashboard", ...params] = location.hash.replace(/^#\/?/, "").split("/");
   const page = document.getElementById("page");
   const navItem = NAV.find((n) => n.path === name);
-  if ((navItem && !navItem.roles.includes(state.user.role)) || !PAGES[name]) {
+  if ((navItem && !allowed(navItem, state.user.role)) || !PAGES[name]) {
     location.hash = "#/dashboard";
     return;
   }

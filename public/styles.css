@@ -202,3 +202,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .banner { border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; font-weight: 600; }
 .banner.red { background: var(--red-soft); color: var(--red); border: 1px solid #e6b6b0; }
 @media (max-width: 640px) { .cal .day { min-height: 64px; } .cal .ev { font-size: 0; height: 6px; padding: 0; } }
+
+/* Report header (grade, teacher, assistant) */
+.report-head { display: flex; flex-wrap: wrap; gap: 10px 28px; padding: 12px 14px; margin-bottom: 14px; background: #f6faf8; border: 1px solid var(--line); border-radius: 10px; }
+.report-head div { display: flex; flex-direction: column; }
+tfoot td { background: #fafbfa; border-top: 1px solid var(--line); }

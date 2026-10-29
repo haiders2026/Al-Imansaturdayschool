@@ -1,6 +1,20 @@
 import { state, api, esc, studentName, className, toast, emptyState, modal, onSubmit, confirmBox, waChat, download, toCSV } from "../core.js";
 
-const ROLE_LABEL = { admin: "Admin", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" };
+const ROLE_LABEL = { admin: "Admin / office", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" };
+
+// Must match TEACHING_MODULES / OFFICE_MODULES on the server.
+const MODULES = {
+  attendance: "Attendance", grades: "Tests & grades", assignments: "Assignments", lessonplans: "Lesson plans",
+  students: "Students", notes: "Teacher notes", reports: "Reports", calendar: "Calendar (add events)",
+  documents: "Documents", classes: "Grades & WhatsApp", payments: "Payments", registrations: "Registrations",
+};
+const OFFICE = ["payments", "registrations"];
+const modulesFor = (role) => Object.keys(MODULES).filter((m) => role === "admin" || !OFFICE.includes(m));
+const accessLabel = (u) => {
+  if (u.role === "parent") return "";
+  if (!Array.isArray(u.modules)) return u.role === "admin" ? "Full access" : "All teaching modules";
+  return u.modules.map((m) => MODULES[m]).filter(Boolean).join(", ") || "No modules";
+};
 
 export async function render(page, [tab = "staff"]) {
   const users = await api("GET", "/users");
@@ -12,10 +26,10 @@ export async function render(page, [tab = "staff"]) {
     <div class="page-head"><div><h1>Staff & logins</h1><div class="muted">Teachers see only their own classes. Parents see only their own children.</div></div>
       <div class="btn-row">${tab === "parents" ? `<button class="btn secondary" id="gen">Create logins for all families</button>` : ""}<button class="btn" id="add">+ Add ${tab === "parents" ? "parent" : "staff"} login</button></div></div>
     <div class="tabs"><button data-t="staff" class="${tab === "staff" ? "active" : ""}">Admins, teachers & assistants</button><button data-t="parents" class="${tab === "parents" ? "active" : ""}">Parents (${users.filter((u) => u.role === "parent").length})</button></div>
-    <div class="card">${list.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>${tab === "parents" ? "Children" : "Classes"}</th><th>Phone</th><th></th></tr></thead><tbody>
+    <div class="card">${list.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Username</th><th>Role</th><th>${tab === "parents" ? "Children" : "Classes"}</th>${tab === "parents" ? "" : "<th>Can use</th>"}<th>Phone</th><th></th></tr></thead><tbody>
       ${list.map((u) => `<tr><td><strong>${esc(u.name)}</strong> ${u.active === false ? `<span class="badge red">Disabled</span>` : ""}</td><td>${esc(u.username)}</td><td><span class="badge ${u.role === "admin" ? "amber" : u.role === "parent" ? "" : "blue"}">${ROLE_LABEL[u.role]}</span></td>
         <td class="small">${esc(u.role === "parent" ? (u.studentIds || []).map((id) => studentName(state.students.find((s) => s.id === id))).join(", ") : classesOf(u))}</td>
-        <td>${esc(u.phone || "")}</td><td><button class="btn sm secondary" data-edit="${u.id}">Edit</button></td></tr>`).join("")}
+        ${tab === "parents" ? "" : `<td class="small">${esc(accessLabel(u))}</td>`}<td>${esc(u.phone || "")}</td><td><button class="btn sm secondary" data-edit="${u.id}">Edit</button></td></tr>`).join("")}
     </tbody></table></div>` : emptyState(tab === "parents" ? "No parent logins yet. Use “Create logins for all families” to make one per family phone number." : "No staff yet.")}
     ${tab === "staff" ? `<p class="muted small">To assign a teacher or assistant teacher to a grade, go to <a href="#/classes">Grades & WhatsApp</a> → Edit.</p>` : ""}</div>`;
 
@@ -63,14 +77,38 @@ function userForm(u) {
       <div class="field"><label>Email</label><input name="email" type="email" value="${esc(u.email || "")}"></div></div>
       <div class="field" id="kids" style="${u.role === "parent" ? "" : "display:none"}"><label>Children (hold Ctrl/⌘ to choose several)</label>
         <select name="studentIds" multiple size="8">${students.map((s) => `<option value="${s.id}" ${(u.studentIds || []).includes(s.id) ? "selected" : ""}>${esc(studentName(s))} — ${esc(className(s.classId))}</option>`).join("")}</select></div>
+      <fieldset id="access" style="${u.role === "parent" ? "display:none" : ""}"><legend>What can they use?</legend>
+        ${u.id && u.id === state.user.id ? `<p class="muted small">You always have full access to your own login.</p>` : `
+        <div id="admin-mode"><label class="check"><input type="radio" name="mode" value="full" ${!Array.isArray(u.modules) ? "checked" : ""}> Full access, including staff logins and settings</label>
+          <label class="check"><input type="radio" name="mode" value="some" ${Array.isArray(u.modules) ? "checked" : ""}> Only the modules ticked below</label></div>
+        <p class="muted small" id="teach-note">Teachers and assistants only ever see their own grade.</p>
+        <div class="form-grid" id="mods" style="margin-top:8px">${Object.entries(MODULES).map(([k, l]) => `<label class="check" data-mod="${k}"><input type="checkbox" name="mod_${k}" ${!Array.isArray(u.modules) || u.modules.includes(k) ? "checked" : ""}> ${l}</label>`).join("")}</div>`}
+        <p></p></fieldset>
       ${u.id ? `<label class="check"><input type="checkbox" name="resetPassword"> Reset password (a new one will be shown)</label>
         <label class="check"><input type="checkbox" name="active" ${u.active !== false ? "checked" : ""}> Account active</label>` : `<div class="field"><label>Password (leave blank to generate one)</label><input name="password" minlength="8"></div>`}
       <div class="modal-foot">${u.id && u.id !== state.user.id ? `<button type="button" class="btn danger" id="del" style="margin-right:auto">Delete</button>` : ""}<button type="button" class="btn secondary" data-close>Cancel</button><button class="btn" type="submit">Save</button></div></form>`,
   });
   const form = el.querySelector("form");
-  form.elements.role.onchange = (e) => { el.querySelector("#kids").style.display = e.target.value === "parent" ? "" : "none"; };
+  const syncAccess = () => {
+    const role = form.elements.role.value;
+    el.querySelector("#kids").style.display = role === "parent" ? "" : "none";
+    el.querySelector("#access").style.display = role === "parent" ? "none" : "";
+    const adminMode = el.querySelector("#admin-mode");
+    if (!adminMode) return;
+    adminMode.style.display = role === "admin" ? "" : "none";
+    el.querySelector("#teach-note").style.display = role === "admin" ? "none" : "";
+    const full = role === "admin" && form.querySelector("[name=mode][value=full]").checked;
+    el.querySelector("#mods").style.display = full ? "none" : "";
+    el.querySelectorAll("[data-mod]").forEach((l) => { l.style.display = modulesFor(role).includes(l.dataset.mod) ? "" : "none"; });
+  };
+  form.addEventListener("change", syncAccess);
+  syncAccess();
   onSubmit(form, async (v) => {
     if (v.role !== "parent") delete v.studentIds;
+    const modules = modulesFor(v.role).filter((m) => v[`mod_${m}`]);
+    Object.keys(v).filter((k) => k.startsWith("mod_")).forEach((k) => delete v[k]);
+    if (v.role !== "parent" && el.querySelector("#mods")) v.modules = v.role === "admin" && v.mode === "full" ? null : modules;
+    delete v.mode;
     const res = await api("POST", "/users", { ...v, id: u.id });
     close();
     if (res.tempPassword) showCredentials([{ name: res.user.name, username: res.user.username, phone: res.user.phone, tempPassword: res.tempPassword }]);

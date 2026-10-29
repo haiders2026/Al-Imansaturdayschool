@@ -1,4 +1,4 @@
-import { state, api, esc, fmtDate, today, isAdmin, isStaff, className, classOptions, modal, onSubmit, toast, confirmBox, emptyState, waShare } from "../core.js";
+import { state, api, esc, fmtDate, today, isAdmin, isStaff, can, className, classOptions, modal, onSubmit, toast, confirmBox, emptyState, waShare } from "../core.js";
 
 export const EVENT_TYPES = { noschool: "No school", event: "Event", exam: "Exam / test", other: "Other" };
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -38,7 +38,7 @@ export async function render(page, [monthParam = ""]) {
 
   page.innerHTML = `
     <div class="page-head"><div><h1>School calendar</h1><div class="muted">Holidays, days with no school, events and exams.${isStaff() ? " Tap an event to share it on WhatsApp." : ""}</div></div>
-      ${isStaff() ? `<button class="btn" id="new">+ Add to calendar</button>` : ""}</div>
+      ${isStaff() && can("calendar") ? `<button class="btn" id="new">+ Add to calendar</button>` : ""}</div>
     <div class="grid cols-2" style="grid-template-columns:minmax(0,2fr) minmax(280px,1fr)">
       <div class="card">
         <div class="cal-head"><a class="btn secondary sm" href="#/calendar/${shift(-1)}">‹</a><h2 style="margin:0">${MONTHS[m - 1]} ${y}</h2><a class="btn secondary sm" href="#/calendar/${shift(1)}">›</a></div>
@@ -58,7 +58,7 @@ export async function render(page, [monthParam = ""]) {
 }
 
 export function viewEvent(e) {
-  const canEdit = isAdmin() || e.authorId === state.user.id;
+  const canEdit = can("calendar") && (isAdmin() || e.authorId === state.user.id);
   const { el, close } = modal({
     title: e.title,
     body: `<div class="btn-row" style="margin-bottom:10px"><span class="badge ${e.type === "noschool" ? "red" : ""}">${EVENT_TYPES[e.type]}</span><span class="badge">${e.classId ? esc(className(e.classId)) : "Whole school"}</span></div>

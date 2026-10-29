@@ -43,6 +43,8 @@ export const isAdmin = () => state.user?.role === "admin";
 export const isTeacher = () => ["teacher", "assistant"].includes(state.user?.role);
 export const isParent = () => state.user?.role === "parent";
 export const isStaff = () => isAdmin() || isTeacher();
+// Modules this staff member may use (set per person under Staff & Logins).
+export const can = (module) => (state.user?.access || []).includes(module);
 
 // ---------- formatting ----------
 
@@ -154,6 +156,7 @@ export function formValues(form) {
   for (const el of form.elements) {
     if (!el.name) continue;
     if (el.type === "checkbox") out[el.name] = el.checked;
+    else if (el.type === "radio") { if (el.checked) out[el.name] = el.value; }
     else if (el.multiple) out[el.name] = [...el.selectedOptions].map((o) => o.value);
     else out[el.name] = el.value.trim();
   }
@@ -235,4 +238,14 @@ export async function downloadAuthed(path, filename) {
   const res = await fetch(`/api${path}`, { headers: { authorization: `Bearer ${state.token}` } });
   if (!res.ok) { toast("Couldn't download that file.", "error"); return; }
   download(filename, await res.blob());
+}
+
+// Opens a protected file (e.g. a PDF) in a new tab. The tab is opened first so pop-up blockers allow it.
+export async function openAuthed(path, filename) {
+  const tab = window.open("", "_blank");
+  const res = await fetch(`/api${path}`, { headers: { authorization: `Bearer ${state.token}` } });
+  if (!res.ok) { tab?.close(); toast("Couldn't open that file.", "error"); return; }
+  const blob = await res.blob();
+  if (!tab || !/pdf|image/.test(blob.type)) { tab?.close(); download(filename, blob); return; }
+  tab.location.href = URL.createObjectURL(blob);
 }
