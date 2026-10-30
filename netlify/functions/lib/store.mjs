@@ -36,8 +36,12 @@ function fileBackend(dir) {
   };
 }
 
+// Netlify hands each request a short-lived Blobs access token, so the store must be opened per
+// request. Keeping one store across requests worked at first but failed with an error once the
+// function had been idle for a few minutes and its saved token had expired.
+let getStore;
 async function blobsBackend() {
-  const { getStore } = await import("@netlify/blobs");
+  getStore ||= (await import("@netlify/blobs")).getStore;
   const store = getStore({ name: "school", consistency: "strong" });
   return {
     getJSON: (key) => store.get(key, { type: "json" }),
@@ -56,10 +60,8 @@ async function blobsBackend() {
 }
 
 export async function db() {
-  if (!backend) {
-    backend = process.env.LOCAL_DATA_DIR ? fileBackend(process.env.LOCAL_DATA_DIR) : await blobsBackend();
-  }
-  return backend;
+  if (process.env.LOCAL_DATA_DIR) return (backend ||= fileBackend(process.env.LOCAL_DATA_DIR));
+  return blobsBackend();
 }
 
 export const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
