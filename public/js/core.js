@@ -9,11 +9,20 @@ export const state = {
 };
 
 export async function api(method, path, body) {
-  const res = await fetch(`/api${path}`, {
+  const send = () => fetch(`/api${path}`, {
     method,
     headers: { "content-type": "application/json", ...(state.token ? { authorization: `Bearer ${state.token}` } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  // A request after the app has sat idle can hit a server that is still waking up (or a dropped
+  // phone connection). Reads are safe to repeat, so try those once more before showing an error.
+  let res;
+  try { res = await send(); } catch { res = null; }
+  if (method === "GET" && (!res || res.status >= 500)) {
+    await new Promise((r) => setTimeout(r, 800));
+    try { res = await send(); } catch { res = null; }
+  }
+  if (!res) throw new Error("Couldn't reach the school server. Check your internet connection and try again.");
   if (res.status === 401 && state.token) {
     logout();
     throw new Error("Please sign in again.");
