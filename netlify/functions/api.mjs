@@ -92,6 +92,7 @@ const GATES = [
   [/^\/users/, null, ["users"]],
   [/^\/(seed|backup|restore)\b/, null, ["settings"]],
   [/^\/settings/, /PUT/, ["settings"]],
+  [/^\/dashboard\/image/, /PUT|DELETE/, ["settings"]],
 ];
 function checkGate(user, method, path) {
   if (user.role === "parent") return;
@@ -1016,6 +1017,35 @@ route("DELETE", "/mynotes/:id", async ({ user, params }) => {
   return { ok: true };
 });
 
+// Dashboard picture: one image the admin swaps from time to time, shown to everyone who signs in.
+const IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+route("GET", "/dashboard/image", async () => sendFile("dashboard-image", { inline: true }));
+route("PUT", "/dashboard/image", async ({ user, body }) => {
+  requireRole(user, "admin");
+  if (!body.file?.data) fail(400, "Choose a picture to upload.");
+  if (!IMAGE_TYPES.includes(body.file.type)) fail(400, "Please upload a .jpg picture (PNG also works).");
+  const file = await saveUpload("dashboard-image", body.file);
+  const meta = { ...file, caption: String(body.caption || "").slice(0, 200), updatedAt: new Date().toISOString(), updatedBy: user.name };
+  await (await db()).setJSON("dashboardImage", meta);
+  return meta;
+});
+route("PUT", "/dashboard/image/caption", async ({ user, body }) => {
+  requireRole(user, "admin");
+  const store = await db();
+  const meta = await store.getJSON("dashboardImage");
+  if (!meta) fail(404, "Upload a picture first.");
+  const next = { ...meta, caption: String(body.caption || "").slice(0, 200) };
+  await store.setJSON("dashboardImage", next);
+  return next;
+});
+route("DELETE", "/dashboard/image", async ({ user }) => {
+  requireRole(user, "admin");
+  const store = await db();
+  await store.del("dashboardImage");
+  await store.del("file:dashboard-image");
+  return { ok: true };
+});
+
 // Dashboard numbers
 route("GET", "/dashboard", async ({ user }) => {
   const students = (await visibleStudents(user)).filter((s) => s.active !== false);
@@ -1037,7 +1067,7 @@ route("GET", "/dashboard", async ({ user }) => {
   const assignments = (await all("assignments")).filter((a) => classIds.includes(a.classId));
   const today = new Date().toISOString().slice(0, 10);
   const upcoming = assignments.filter((a) => a.dueDate && a.dueDate >= today).sort((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 5);
-  const out = { studentCount: students.length, classCount: classes.length, lastDay, upcoming, classes };
+  const out = { studentCount: students.length, classCount: classes.length, lastDay, upcoming, classes, image: await (await db()).getJSON("dashboardImage") };
   if (user.role === "admin") {
     if (can(user, "payments")) {
       const summary = await routeFor("GET", "/payments/summary").handler({ user });

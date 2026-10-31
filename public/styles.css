@@ -214,3 +214,10 @@ tfoot td { background: #fafbfa; border-top: 1px solid var(--line); }
 .check-list .check { padding: 3px 0; }
 .mynote-text { max-height: 9.5em; overflow: hidden; }
 .mynote:hover { border-color: var(--green); }
+
+/* Dashboard picture: fills the width of its box */
+.dash-picture { padding: 12px; }
+.dash-picture-frame { min-height: 80px; display: grid; place-items: center; }
+.dash-picture-frame img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.dash-picture-caption { margin: 10px 4px 0; font-weight: 600; }
+.dash-picture-tools { margin-top: 10px; }

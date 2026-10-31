@@ -1,4 +1,4 @@
-import { state, api, esc, fmtDate, fmtMoney, isAdmin, isParent, isStaff, can, studentName, className, classOptions, modal, onSubmit, toast, confirmBox, emptyState, waShare } from "../core.js";
+import { state, api, esc, fileToBase64, fmtDate, fmtMoney, isAdmin, isParent, isStaff, can, studentName, className, classOptions, modal, onSubmit, toast, confirmBox, emptyState, waShare } from "../core.js";
 import { upcomingEvents, eventRow, wireEvents, whenText } from "./calendar.js";
 import { inboxItem } from "./messages.js";
 
@@ -45,8 +45,10 @@ export async function render(page) {
         <div class="list-item"><strong>${esc(a.title)}</strong> <span class="badge">${esc(className(a.classId))}</span>
         <div class="meta">Due ${fmtDate(a.dueDate)}</div></div>`).join("") + `<p><a href="#/assignments">All assignments →</a></p>` : emptyState("Nothing due.")}</div>
       <div class="card"><h2>Coming up</h2>${upcoming.length ? upcoming.slice(0, 5).map(eventRow).join("") : emptyState("Nothing on the calendar yet.")}<p><a href="#/calendar">School calendar →</a></p></div>
-    </div>`;
+    </div>
+    ${dash.image || canChangePicture() ? `<div class="card dash-picture" id="pic"></div>` : ""}`;
   wireEvents(page, events);
+  if (page.querySelector("#pic")) picture(page.querySelector("#pic"), dash.image);
 
   page.querySelector("#new-ann")?.addEventListener("click", newAnnouncement);
   page.querySelectorAll("[data-del-ann]").forEach((b) => b.onclick = async () => {
@@ -114,6 +116,53 @@ function newAnnouncement() {
     toast("Announcement posted");
     close();
     if (v.share) window.open(waShare(`📢 *${v.title}*\n${v.body}\n\n— ${state.settings.schoolName}`), "_blank");
+    window.refreshPage();
+  });
+}
+
+// The picture block at the bottom of the dashboard. Everyone sees it; full admins upload or replace it.
+const PICTURE_MAX_MB = 4;
+const canChangePicture = () => isAdmin() && can("settings");
+
+async function picture(box, meta) {
+  const controls = canChangePicture() ? `<div class="btn-row no-print dash-picture-tools">
+      <label class="btn sm ${meta ? "secondary" : ""}">${meta ? "Change picture" : "Upload a picture"}<input type="file" accept=".jpg,.jpeg,image/jpeg,image/png,image/webp" hidden></label>
+      ${meta ? `<button class="btn sm secondary" data-caption>Edit caption</button><button class="btn sm danger" data-remove>Remove</button>` : ""}
+      <span class="muted small">${meta ? `Updated ${fmtDate(meta.updatedAt)} by ${esc(meta.updatedBy || "")}` : `A .jpg up to ${PICTURE_MAX_MB} MB. It fills the width of this box, and everyone sees it when they sign in.`}</span></div>` : "";
+  box.innerHTML = `${meta ? `<div class="dash-picture-frame"><div class="spinner"></div></div>${meta.caption ? `<p class="dash-picture-caption">${esc(meta.caption)}</p>` : ""}` : ""}${controls}`;
+
+  if (meta) {
+    const res = await fetch(`/api/dashboard/image?v=${encodeURIComponent(meta.updatedAt)}`, { headers: { authorization: `Bearer ${state.token}` } });
+    const frame = box.querySelector(".dash-picture-frame");
+    if (res.ok) {
+      const img = new Image();
+      img.alt = meta.caption || "School picture";
+      img.src = URL.createObjectURL(await res.blob());
+      frame.replaceChildren(img);
+    } else frame.innerHTML = `<p class="muted">The picture couldn't be loaded.</p>`;
+  }
+
+  box.querySelector("input[type=file]")?.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > PICTURE_MAX_MB * 1024 * 1024) return toast(`That picture is too big. Please keep it under ${PICTURE_MAX_MB} MB.`, "error");
+    try {
+      await api("PUT", "/dashboard/image", { caption: meta?.caption || "", file: { name: file.name, type: file.type, data: await fileToBase64(file) } });
+      toast("Picture updated");
+      window.refreshPage();
+    } catch (err) { toast(err.message, "error"); }
+  });
+  box.querySelector("[data-caption]")?.addEventListener("click", () => {
+    const { el, close } = modal({
+      title: "Picture caption",
+      body: `<form><div class="field"><label>Caption under the picture (optional)</label><input name="caption" value="${esc(meta.caption || "")}" maxlength="200"></div>
+        <div class="modal-foot"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn" type="submit">Save</button></div></form>`,
+    });
+    onSubmit(el.querySelector("form"), async (v) => { await api("PUT", "/dashboard/image/caption", v); close(); window.refreshPage(); });
+  });
+  box.querySelector("[data-remove]")?.addEventListener("click", async () => {
+    if (!(await confirmBox("Remove the picture from the dashboard?", { okText: "Remove" }))) return;
+    await api("DELETE", "/dashboard/image");
     window.refreshPage();
   });
 }
