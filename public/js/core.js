@@ -264,3 +264,28 @@ export async function openAuthed(path, filename) {
   if (!tab || !/pdf|image/.test(blob.type)) { tab?.close(); download(filename, blob); return; }
   tab.location.href = URL.createObjectURL(blob);
 }
+
+// Click a column heading to sort the table by it; click again to reverse. Rows are sorted in place
+// by each cell's data-sort value or its text. `sort` ({ col, dir }) keeps the choice across redraws.
+export function makeSortable(table, sort = {}) {
+  if (!table) return sort;
+  const heads = [...table.tHead.rows[0].cells];
+  const body = table.tBodies[0];
+  const key = (row, i) => (row.cells[i]?.dataset.sort ?? row.cells[i]?.textContent ?? "").trim().toLowerCase();
+  const apply = () => {
+    heads.forEach((th, i) => th.setAttribute("aria-sort", i === sort.col ? (sort.dir > 0 ? "ascending" : "descending") : "none"));
+    if (sort.col === undefined) return;
+    const rows = [...body.rows].sort((a, b) => {
+      const x = key(a, sort.col), y = key(b, sort.col);
+      return x === y ? 0 : !x ? 1 : !y ? -1 : x.localeCompare(y, undefined, { numeric: true }) * sort.dir;
+    });
+    body.append(...rows);
+  };
+  heads.forEach((th, i) => {
+    if (!th.textContent.trim()) return;
+    th.classList.add("sortable");
+    th.onclick = () => { sort.dir = sort.col === i ? -sort.dir : 1; sort.col = i; apply(); };
+  });
+  apply();
+  return sort;
+}

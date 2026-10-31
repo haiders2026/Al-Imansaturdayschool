@@ -45,7 +45,9 @@ const STUDENT_FIELDS = [
   "medical", "allergies", "photoConsent", "pickupAuthorized", "adminNote", "fee", "books", "code",
 ];
 // "code" is the school's private R/C code (no code means C); only admins see it.
-const FEE_FIELDS = ["fee", "adminNote", "code", "books"];
+const FEE_FIELDS = ["fee", "adminNote", "code", "books", "added"];
+// Who created a student record, and how. Set once, never from the request body; admins only.
+const addedInfo = (user, via, extra = {}) => ({ by: user.name, byId: user.id, via, at: new Date().toISOString(), ...extra });
 
 // Teachers and assistant teachers work the same way, limited to the grades they're assigned to.
 const TEACHING = ["teacher", "assistant"];
@@ -113,7 +115,7 @@ async function visibleStudents(user) {
     return students.filter((s) => ids.includes(s.classId)).map((s) => stripFields(s, FEE_FIELDS));
   }
   const mine = user.studentIds || [];
-  return students.filter((s) => mine.includes(s.id)).map((s) => stripFields(s, ["adminNote", "code"]));
+  return students.filter((s) => mine.includes(s.id)).map((s) => stripFields(s, ["adminNote", "code", "added"]));
 }
 
 function stripFields(obj, keys) {
@@ -402,7 +404,9 @@ route("GET", "/students", async ({ user }) => visibleStudents(user));
 route("POST", "/students", async ({ user, body }) => {
   requireRole(user, "admin");
   if (!body.firstName) fail(400, "First name is required.");
-  return upsert("students", { ...cleanFeeFields(pick(body, ["id", ...STUDENT_FIELDS])), active: body.active !== false });
+  const record = { ...cleanFeeFields(pick(body, ["id", ...STUDENT_FIELDS])), active: body.active !== false };
+  if (!body.id || !(await findById("students", body.id))) record.added = addedInfo(user, "manual");
+  return upsert("students", record);
 });
 // Quick edit from the payments page: number of books a student takes.
 route("PUT", "/students/:id/books", async ({ user, params, body }) => {
@@ -452,7 +456,7 @@ route("POST", "/students/import", async ({ user, body }) => {
       (row.studentCode && s.studentCode === row.studentCode) ||
       (s.firstName.toLowerCase() === row.firstName.toLowerCase() && (s.lastName || "").toLowerCase() === (row.lastName || "").toLowerCase()));
     if (existing) { Object.assign(existing, record, { updatedAt: now }); updated++; }
-    else { students.push({ ...record, id: newId(), active: true, createdAt: now }); added++; }
+    else { students.push({ ...record, id: newId(), active: true, createdAt: now, added: addedInfo(user, "import") }); added++; }
     const paid = Number(String(row.paid || "").replace(/[^\d.]/g, ""));
     if (body.importPayments && paid > 0) {
       const s = existing || students[students.length - 1];
@@ -864,7 +868,7 @@ route("POST", "/registrations/:id/approve", async ({ user, params, body }) => {
       active: true,
     });
     const existing = matchStudent(students, reg.family, child);
-    const saved = await upsert("students", existing ? { ...record, id: existing.id } : { ...record, enrolledOn: new Date().toISOString().slice(0, 10) });
+    const saved = await upsert("students", existing ? { ...record, id: existing.id } : { ...record, enrolledOn: new Date().toISOString().slice(0, 10), added: addedInfo(user, "registration", { ref: reg.ref || "", submittedAt: reg.createdAt }) });
     studentIds.push(saved.id);
   }
   if (!studentIds.length) fail(400, "Pick at least one child to add.");
@@ -1100,7 +1104,7 @@ route("POST", "/seed", async ({ user, body }) => {
     const record = { ...pick(s, STUDENT_FIELDS), classId: classId(s.className) };
     const existing = students.find((x) => x.firstName.toLowerCase() === s.firstName.toLowerCase() && (x.lastName || "").toLowerCase() === (s.lastName || "").toLowerCase());
     if (existing) { Object.assign(existing, record, { updatedAt: now }); idByKey[s.key] = existing.id; }
-    else { const id = newId(); students.push({ ...record, id, active: s.active !== false, createdAt: now }); idByKey[s.key] = id; }
+    else { const id = newId(); students.push({ ...record, id, active: s.active !== false, createdAt: now, added: addedInfo(user, "starter") }); idByKey[s.key] = id; }
   }
   await saveAll("classes", classes);
   await saveAll("students", students);
