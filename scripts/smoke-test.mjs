@@ -239,6 +239,20 @@ token = (await call("POST", "/auth/login", { username: "tt", password: "teacherp
 ok((await call("GET", "/messages")).some((m) => m.id === bMsg.id), "staff see messages the office sent to them");
 token = adminToken;
 
+// Dashboard picture
+token = adminToken;
+const jpg = { name: "eid.jpg", type: "image/jpeg", data: Buffer.from("\xff\xd8\xff fake jpeg", "latin1").toString("base64") };
+await call("PUT", "/dashboard/image", { file: { ...jpg, type: "application/pdf" } }, 400);
+const pic = await call("PUT", "/dashboard/image", { file: jpg, caption: "Eid Mubarak" });
+ok(pic.caption === "Eid Mubarak" && (await call("GET", "/dashboard")).image.updatedAt === pic.updatedAt, "admin uploads the dashboard picture");
+token = (await call("POST", "/auth/login", { username: fam.username, password: fam.tempPassword })).token;
+ok((await call("GET", "/dashboard")).image.caption === "Eid Mubarak" && (await call("GET", "/dashboard/image")).length > 0, "parents see the dashboard picture");
+await call("PUT", "/dashboard/image", { file: jpg }, 403);
+token = (await call("POST", "/auth/login", { username: "tt", password: "teacherpass" })).token;
+await call("DELETE", "/dashboard/image", null, 403);
+ok(true, "only admins can change the picture");
+token = adminToken;
+
 // Per-person module access
 token = adminToken;
 await call("POST", "/users", { id: t.user.id, name: "Teacher T", username: "tt", role: "teacher", modules: ["attendance", "students"] });
