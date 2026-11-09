@@ -39,6 +39,8 @@ Other bits: announcements, printable report cards and receipts, attendance regis
 
 **Fees:** the yearly fee is a base fee ($150) plus a fee per book ($25). Every student takes 1 book unless you change it (Payments → By student, or the student's Edit form). Both amounts are in Settings.
 
+**Family payments:** when parents pay once for several children, go to **Payments → By family → Record**. Enter the total and the app splits it between the children by what each still owes (or evenly, or type each amount). Each child's balance gets their share, and the family gets one receipt. A payment already recorded on one child can be split later from **Payment history → Split**.
+
 **Locked out of the admin account?** In Netlify, add an environment variable `ADMIN_RECOVERY_CODE` (a secret of 12+ characters), redeploy, then click "Admin locked out?" on the sign-in page. You can sign in with your username or your email.
 
 Data is stored in Netlify Blobs for that site. Download a backup from **Settings & Import → Backup** every few weeks.
