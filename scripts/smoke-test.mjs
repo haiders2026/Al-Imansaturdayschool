@@ -115,6 +115,22 @@ const fam = created.find((c) => c.studentIds.includes(kids[0].id));
 await call("POST", "/payments", { studentId: kids[0].id, amount: 100, method: "Cash" });
 const summary = await call("GET", "/payments/summary");
 ok(summary.rows.find((r) => r.studentId === kids[0].id).fee === 325, "default fee plus one book applies");
+{
+  const owed = (sum, id) => sum.rows.find((r) => r.studentId === id);
+  const [a, b] = [kids[0].id, kids[1].id];
+  const before = await call("GET", "/payments/summary");
+  await call("POST", "/payments/family", { parts: [{ studentId: a, amount: 50 }, { studentId: a, amount: 10 }] }, 400);
+  await call("POST", "/payments/family", { parts: [{ studentId: "nobody", amount: 50 }] }, 400);
+  const fp = await call("POST", "/payments/family", { date: "2026-11-01", method: "Cash", parts: [{ studentId: a, amount: 60 }, { studentId: b, amount: 40.5 }] });
+  ok(fp.payments.length === 2 && fp.total === 100.5 && fp.payments.every((p) => p.receiptNo === fp.receiptNo && p.familyPaymentId === fp.payments[0].familyPaymentId), "a family payment makes one line per child on one receipt");
+  const after = await call("GET", "/payments/summary");
+  ok(owed(after, a).paid - owed(before, a).paid === 60 && owed(after, b).paid - owed(before, b).paid === 40.5, "each child's balance gets their share");
+  const one = await call("POST", "/payments", { studentId: a, amount: 90, method: "Cash" });
+  await call("POST", `/payments/${one.id}/split`, { parts: [{ studentId: a, amount: 50 }, { studentId: b, amount: 30 }] }, 400);
+  const split = await call("POST", `/payments/${one.id}/split`, { parts: [{ studentId: a, amount: 50 }, { studentId: b, amount: 40 }] });
+  const hist = await call("GET", "/payments");
+  ok(split.payments.length === 2 && hist.filter((p) => p.receiptNo === one.receiptNo).reduce((t, p) => t + p.amount, 0) === 90 && hist.some((p) => p.id === one.id && p.amount === 50), "a payment on one child can be split between siblings, keeping its receipt and total");
+}
 
 // Calendar
 await call("POST", "/events", { title: "Eid holiday", type: "noschool", date: "2026-11-21" });

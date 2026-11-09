@@ -726,6 +726,49 @@ route("POST", "/payments", async ({ user, body }) => {
     ...(body.id ? {} : { recordedBy: user.name, receiptNo: `${(settings.academicYear || "").slice(0, 4)}-${String(count).padStart(4, "0")}` }),
   });
 });
+// A family pays once for several children: one receipt, one payment line per child so each child's balance is right.
+const money = (n) => Math.round(Number(n) * 100) / 100;
+async function cleanParts(parts, total) {
+  const students = await all("students");
+  const list = (Array.isArray(parts) ? parts : []).map((x) => ({ studentId: x.studentId, amount: money(x.amount || 0) })).filter((x) => x.amount);
+  if (!list.length) fail(400, "Enter an amount for at least one child.");
+  if (list.some((x) => !students.some((s) => s.id === x.studentId))) fail(400, "Pick a student for each amount.");
+  if (new Set(list.map((x) => x.studentId)).size !== list.length) fail(400, "Each child can only appear once.");
+  if (total !== undefined && Math.abs(money(list.reduce((t, x) => t + x.amount, 0)) - money(total)) > 0.001) fail(400, `The amounts must add up to ${money(total)}.`);
+  return list;
+}
+route("POST", "/payments/family", async ({ user, body }) => {
+  requireRole(user, "admin");
+  const parts = await cleanParts(body.parts);
+  const settings = await getSettings();
+  const payments = await all("payments");
+  const now = new Date().toISOString();
+  const receiptNo = `${(settings.academicYear || "").slice(0, 4)}-${String(payments.length + 1).padStart(4, "0")}`;
+  const familyPaymentId = parts.length > 1 ? newId() : undefined;
+  const created = parts.map((x) => ({
+    ...pick(body, ["date", "method", "reference", "note"]),
+    id: newId(), studentId: x.studentId, amount: x.amount, date: body.date || now.slice(0, 10),
+    familyPaymentId, recordedBy: user.name, receiptNo, createdAt: now,
+  }));
+  await saveAll("payments", [...payments, ...created]);
+  return { payments: created, total: money(parts.reduce((t, x) => t + x.amount, 0)), receiptNo };
+});
+// Re-assign a payment that was recorded against one child to several siblings. The total stays the same.
+route("POST", "/payments/:id/split", async ({ user, params, body }) => {
+  requireRole(user, "admin");
+  const payments = await all("payments");
+  const orig = payments.find((p) => p.id === params.id);
+  if (!orig) fail(404, "Payment not found.");
+  const parts = await cleanParts(body.parts, orig.amount);
+  const now = new Date().toISOString();
+  const familyPaymentId = parts.length > 1 ? orig.familyPaymentId || newId() : orig.familyPaymentId;
+  const created = parts.map((x, i) => ({
+    ...orig, id: i === 0 ? orig.id : newId(), studentId: x.studentId, amount: x.amount, familyPaymentId,
+    ...(i === 0 ? { updatedAt: now } : { createdAt: now, splitFrom: orig.id }),
+  }));
+  await saveAll("payments", [...payments.filter((p) => p.id !== orig.id), ...created]);
+  return { payments: created };
+});
 route("DELETE", "/payments/:id", async ({ user, params }) => {
   requireRole(user, "admin");
   await remove("payments", params.id);
