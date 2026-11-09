@@ -104,10 +104,10 @@ function drawFamilies(body, rows, page) {
           <td class="small">${f.kids.map((k) => `<a href="#/student/${k.id}/payments">${esc(k.firstName)}</a> <span class="muted">${esc(className(k.classId))}</span>`).join("<br>")}</td>
           <td class="num">${fmtMoney(f.fee)}</td><td class="num">${fmtMoney(f.paid)}</td>
           <td class="num">${f.balance > 0 ? `<span class="badge red">${fmtMoney(f.balance)}</span>` : f.fee || f.paid ? `<span class="badge green">${f.balance < 0 ? "Credit " + fmtMoney(-f.balance) : "Paid"}</span>` : ""}</td>
-          <td><div class="btn-row"><button class="btn sm" data-pay="${f.kids[0].id}">Record</button>${f.balance > 0 && f.phone ? `<a class="btn sm wa" href="${waChat(f.phone, msg)}" target="_blank" rel="noopener">Remind</a>` : ""}</div></td></tr>`;
+          <td><div class="btn-row"><button class="btn sm" data-fampay="${f.kids[0].id}">Record</button>${f.balance > 0 && f.phone ? `<a class="btn sm wa" href="${waChat(f.phone, msg)}" target="_blank" rel="noopener">Remind</a>` : ""}</div></td></tr>`;
       }).join("")}</tbody></table></div>
-      <p class="muted small">Siblings are grouped by parent phone number. A family payment can be recorded on any one child; the family balance is what matters.</p>` : emptyState("Nobody in this list.");
-    body.querySelectorAll("[data-pay]").forEach((b) => b.onclick = () => paymentForm(b.dataset.pay));
+      <p class="muted small">Siblings are grouped by parent phone number. <strong>Record</strong> takes one payment from the family and splits it between the children. A payment already recorded on one child can be split from Payment history.</p>` : emptyState("Nobody in this list.");
+    body.querySelectorAll("[data-fampay]").forEach((b) => b.onclick = () => familyPaymentForm(b.dataset.fampay));
   };
   draw();
   body.querySelector("#q").oninput = (e) => { q = e.target.value; draw(); };
@@ -169,10 +169,11 @@ function drawHistory(body, payments, page) {
   body.innerHTML = payments.length ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Receipt</th><th>Student</th><th class="num">Amount</th><th>Method</th><th>Reference / note</th><th>By</th><th></th></tr></thead><tbody>
     ${payments.map((p) => `<tr><td>${fmtDate(p.date)}</td><td>${esc(p.receiptNo || "")}</td><td>${esc(studentName(studentById(p.studentId)))}</td><td class="num">${fmtMoney(p.amount)}</td>
       <td>${esc(p.method || "")}</td><td>${esc([p.reference, p.note].filter(Boolean).join(" · "))}</td><td>${esc(p.recordedBy || "")}</td>
-      <td><div class="btn-row"><button class="btn link small" data-receipt="${p.id}">Receipt</button><button class="btn link small" data-edit="${p.id}">Edit</button><button class="btn link small" style="color:var(--red)" data-del="${p.id}">Delete</button></div></td></tr>`).join("")}
+      <td><div class="btn-row"><button class="btn link small" data-receipt="${p.id}">Receipt</button><button class="btn link small" data-edit="${p.id}">Edit</button>${siblingsOf(studentById(p.studentId)).length > 1 ? `<button class="btn link small" data-split="${p.id}">Split</button>` : ""}<button class="btn link small" style="color:var(--red)" data-del="${p.id}">Delete</button></div></td></tr>`).join("")}
   </tbody></table></div>` : emptyState("No payments recorded yet.");
-  body.querySelectorAll("[data-receipt]").forEach((b) => b.onclick = () => { const p = payments.find((x) => x.id === b.dataset.receipt); showReceipt(p, studentById(p.studentId)); });
+  body.querySelectorAll("[data-receipt]").forEach((b) => b.onclick = () => { const p = payments.find((x) => x.id === b.dataset.receipt); showReceipt(p, studentById(p.studentId), false, p.familyPaymentId ? payments.filter((x) => x.familyPaymentId === p.familyPaymentId) : null); });
   body.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => { const p = payments.find((x) => x.id === b.dataset.edit); paymentForm(p.studentId, p); });
+  body.querySelectorAll("[data-split]").forEach((b) => b.onclick = () => familyPaymentForm(null, payments.find((x) => x.id === b.dataset.split)));
   body.querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
     if (!(await confirmBox("Delete this payment record?"))) return;
     await api("DELETE", `/payments/${b.dataset.del}`);
@@ -198,8 +199,14 @@ export function paymentForm(studentId = "", p = {}) {
         <div class="field"><label>Reference / cheque #</label><input name="reference" value="${esc(p.reference || "")}"></div>
       </div>
       <div class="field"><label>Note</label><input name="note" value="${esc(p.note || "")}" placeholder="e.g. Term 1, sibling discount…"></div>
+      ${p.id ? "" : `<p class="small" id="fam-hint" hidden>Paying for brothers or sisters too? <a href="#" id="fam-link">Split one payment between the children</a></p>`}
       <div class="modal-foot"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn" type="submit">Save</button></div></form>`,
   });
+  const pick = el.querySelector("[name=studentId]");
+  const hint = () => { const h = el.querySelector("#fam-hint"); if (h) h.hidden = siblingsOf(studentById(pick.value)).length < 2; };
+  pick.onchange = hint;
+  hint();
+  el.querySelector("#fam-link")?.addEventListener("click", (e) => { e.preventDefault(); close(); familyPaymentForm(pick.value); });
   onSubmit(el.querySelector("form"), async (v) => {
     const saved = await api("POST", "/payments", { ...v, id: p.id });
     toast("Payment saved");
@@ -209,15 +216,18 @@ export function paymentForm(studentId = "", p = {}) {
   });
 }
 
-export function showReceipt(p, s, refreshOnClose = false) {
-  const msg = `As-salamu alaykum ${parentName(s)}, we received ${fmtMoney(p.amount)} for ${s?.firstName}'s fees on ${fmtDate(p.date)} (receipt ${p.receiptNo || ""}). JazakAllahu khayran — ${state.settings.schoolName}`;
+export function showReceipt(p, s, refreshOnClose = false, parts = null) {
+  const lines = (parts || [p]).map((x) => ({ s: studentById(x.studentId) || s, amount: Number(x.amount) }));
+  const total = lines.reduce((t, x) => t + x.amount, 0);
+  const forWhom = lines.length > 1 ? `${lines.map((x) => `${x.s?.firstName} ${fmtMoney(x.amount)}`).join(", ")}` : `${s?.firstName}'s fees`;
+  const msg = `As-salamu alaykum ${parentName(s)}, we received ${fmtMoney(total)} for ${forWhom} on ${fmtDate(p.date)} (receipt ${p.receiptNo || ""}). JazakAllahu khayran — ${state.settings.schoolName}`;
   const { el, close } = modal({
     title: "Receipt",
     body: `<div style="border:1px dashed #9bb;padding:20px;border-radius:10px">
       <div style="text-align:center"><img src="/logo.png" width="80" alt="Al-Iman logo"><h2 style="margin:6px 0 0">${esc(state.settings.schoolName)}</h2><div class="muted">Payment receipt</div></div>
       <dl class="kv" style="margin-top:16px"><dt>Receipt #</dt><dd>${esc(p.receiptNo || "")}</dd><dt>Date</dt><dd>${fmtDate(p.date)}</dd>
-      <dt>Student</dt><dd>${esc(studentName(s))} (${esc(className(s?.classId))})</dd><dt>Received from</dt><dd>${esc(parentName(s))}</dd>
-      <dt>Amount</dt><dd><strong style="font-size:1.2rem">${fmtMoney(p.amount)}</strong></dd><dt>Method</dt><dd>${esc(p.method || "")}${p.reference ? ` · ${esc(p.reference)}` : ""}</dd>
+      <dt>${lines.length > 1 ? "Students" : "Student"}</dt><dd>${lines.map((x) => `${esc(studentName(x.s))} (${esc(className(x.s?.classId))})${lines.length > 1 ? ` · ${fmtMoney(x.amount)}` : ""}`).join("<br>")}</dd><dt>Received from</dt><dd>${esc(parentName(s))}</dd>
+      <dt>${lines.length > 1 ? "Total" : "Amount"}</dt><dd><strong style="font-size:1.2rem">${fmtMoney(total)}</strong></dd><dt>Method</dt><dd>${esc(p.method || "")}${p.reference ? ` · ${esc(p.reference)}` : ""}</dd>
       ${p.note ? `<dt>Note</dt><dd>${esc(p.note)}</dd>` : ""}<dt>Received by</dt><dd>${esc(p.recordedBy || "")}</dd></dl>
       <p class="muted small" style="text-align:center;margin-top:16px">JazakAllahu khayran for supporting our school.</p></div>
       <div class="modal-foot no-print">${parentPhone(s) ? `<a class="btn wa" href="${waChat(parentPhone(s), msg)}" target="_blank" rel="noopener">Send on WhatsApp</a>` : ""}<button class="btn secondary" id="print">Print</button><button class="btn" data-close>Done</button></div>`,
@@ -225,4 +235,83 @@ export function showReceipt(p, s, refreshOnClose = false) {
   el.querySelector("#print").onclick = () => { document.body.classList.add("printing-modal"); print(); document.body.classList.remove("printing-modal"); };
   if (refreshOnClose) el.parentElement.addEventListener("click", (e) => { if (e.target === el.parentElement || e.target.closest("[data-close]")) window.refreshPage(); });
   return close;
+}
+
+const siblingsOf = (s) => (s ? state.students.filter((x) => (x.active !== false || x.id === s.id) && familyKey(x) === familyKey(s)) : [])
+  .sort((a, b) => a.firstName.localeCompare(b.firstName));
+
+// Fill each child up to what they still owe, in order; anything left over goes on the first child.
+function shareOut(total, kids) {
+  let left = Math.round(total * 100);
+  const out = kids.map((k) => { const n = Math.min(left, Math.max(Math.round(k.owes * 100), 0)); left -= n; return n; });
+  if (out.length) out[0] += left;
+  return out.map((n) => n / 100);
+}
+
+// Record one payment from a family and split it between the children, or (with `orig`) re-split
+// a payment that was recorded on one child. Each child gets their own line so their balance is right.
+export async function familyPaymentForm(studentId, orig = null) {
+  const first = studentById(orig ? orig.studentId : studentId);
+  const { rows } = await api("GET", "/payments/summary");
+  const kids = siblingsOf(first).map((k) => {
+    const r = rows.find((x) => x.studentId === k.id) || { fee: 0, paid: 0, balance: 0 };
+    // When re-splitting, act as if the original payment hadn't been recorded yet.
+    const owes = r.balance + (orig && orig.studentId === k.id ? Number(orig.amount) : 0);
+    return { ...k, fee: r.fee, owes };
+  });
+  const familyOwes = kids.reduce((t, k) => t + Math.max(k.owes, 0), 0);
+  const { el, close } = modal({
+    title: orig ? `Split payment ${orig.receiptNo || ""} between the children` : `Family payment — ${parentName(first)}`,
+    wide: true,
+    body: `<form>
+      ${orig ? `<p>This ${fmtMoney(orig.amount)} payment from ${fmtDate(orig.date)} is recorded on ${esc(first.firstName)}. Choose how much belongs to each child. The total stays ${fmtMoney(orig.amount)}.</p>`
+        : `<div class="form-grid">
+        <div class="field"><label>Total paid (${esc(state.settings.currency || "$")})</label><input type="number" step="0.01" min="0" name="total" required placeholder="${familyOwes ? familyOwes.toFixed(2) : ""}"></div>
+        <div class="field"><label>Date</label><input type="date" name="date" value="${today()}" required></div>
+        <div class="field"><label>Method</label><select name="method">${METHODS.map((m) => `<option>${m}</option>`).join("")}</select></div>
+        <div class="field"><label>Reference / cheque #</label><input name="reference"></div>
+      </div>
+      <div class="field"><label>Note</label><input name="note" placeholder="e.g. Full year, sibling discount…"></div>`}
+      <div class="table-wrap"><table><thead><tr><th>Child</th><th>Class</th><th class="num">Still owes</th><th class="num" style="width:150px">Amount for this child</th></tr></thead><tbody>
+        ${kids.map((k) => `<tr><td><strong>${esc(studentName(k))}</strong></td><td>${esc(className(k.classId))}</td>
+          <td class="num">${k.owes > 0 ? fmtMoney(k.owes) : `<span class="badge green">Paid</span>`}</td>
+          <td class="num"><input type="number" step="0.01" min="0" data-amt="${k.id}" style="text-align:right"></td></tr>`).join("")}
+        <tr><td colspan="3"><strong>Total</strong> <span class="small" id="diff"></span></td><td class="num"><strong id="sum"></strong></td></tr>
+      </tbody></table></div>
+      <div class="btn-row"><button type="button" class="btn secondary sm" id="auto">Split by what each child owes</button><button type="button" class="btn secondary sm" id="even">Split evenly</button></div>
+      <div class="modal-foot"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn" type="submit">${orig ? "Save split" : "Save payment"}</button></div></form>`,
+  });
+  const inputs = [...el.querySelectorAll("[data-amt]")];
+  const totalEl = el.querySelector("[name=total]");
+  const total = () => (orig ? Number(orig.amount) : Number(totalEl.value) || 0);
+  const sum = () => Math.round(inputs.reduce((t, i) => t + (Number(i.value) || 0), 0) * 100) / 100;
+  const set = (amounts) => { inputs.forEach((i, n) => { i.value = amounts[n] ? amounts[n].toFixed(2) : ""; }); refresh(); };
+  const refresh = () => {
+    el.querySelector("#sum").textContent = fmtMoney(sum());
+    const d = Math.round((total() - sum()) * 100) / 100;
+    el.querySelector("#diff").innerHTML = !d ? "" : `<span class="error-text">${d > 0 ? `${fmtMoney(d)} not given to a child yet` : `${fmtMoney(-d)} more than the total`}</span>`;
+  };
+  const auto = () => set(shareOut(total(), kids));
+  inputs.forEach((i) => i.oninput = refresh);
+  totalEl?.addEventListener("input", auto);
+  el.querySelector("#auto").onclick = auto;
+  el.querySelector("#even").onclick = () => { const c = Math.round(total() * 100), n = kids.length; set(kids.map((_, i) => (Math.floor(c / n) + (i < c % n ? 1 : 0)) / 100)); };
+  if (orig) set(kids.map((k) => (k.id === orig.studentId ? Number(orig.amount) : 0)));
+  else if (studentId) refresh();
+  onSubmit(el.querySelector("form"), async (v) => {
+    if (!total()) throw new Error("Enter the total the family paid.");
+    if (Math.abs(sum() - total()) > 0.001) throw new Error(`The children's amounts add up to ${fmtMoney(sum())}, but the total is ${fmtMoney(total())}.`);
+    const parts = inputs.map((i) => ({ studentId: i.dataset.amt, amount: Number(i.value) || 0 })).filter((x) => x.amount);
+    if (orig) {
+      await api("POST", `/payments/${orig.id}/split`, { parts });
+      toast("Payment split between the children");
+      close();
+      return window.refreshPage();
+    }
+    const { total: _t, ...rest } = v;
+    const res = await api("POST", "/payments/family", { ...rest, parts });
+    toast("Payment saved");
+    close();
+    showReceipt(res.payments[0], first, true, res.payments);
+  });
 }
