@@ -1,5 +1,5 @@
 import { state, api, esc, fmtDate, fmtMoney, today, studentName, isAdmin, isStaff, isParent, toast, emptyState, modal, onSubmit, confirmBox, waChat, letterGrade, STATUS_LABEL } from "../core.js";
-import { studentForm } from "./students.js";
+import { studentForm, addedText } from "./students.js";
 import { paymentForm, showReceipt } from "./payments.js";
 
 const NOTE_CATEGORIES = ["General", "Academic", "Behaviour", "Quran / Hifz", "Health", "Praise"];
@@ -16,7 +16,8 @@ export async function render(page, [id, tabParam]) {
     <div class="print-only"><h2>${esc(state.settings.schoolName)} — Student report · ${esc(state.settings.academicYear || "")}</h2></div>
     <div class="page-head"><div><h1>${esc(studentName(s))}</h1>
       <div class="btn-row"><span class="badge green">${esc(p.class?.name || "No class")}</span>${s.active === false ? `<span class="badge red">Withdrawn</span>` : ""}
-      ${s.allergies ? `<span class="badge red">Allergy: ${esc(s.allergies)}</span>` : ""}</div></div>
+      ${s.allergies ? `<span class="badge red">Allergy: ${esc(s.allergies)}</span>` : ""}</div>
+      ${isAdmin() && addedText(s) ? `<div class="small muted no-print" style="margin-top:6px">${esc(addedText(s))}</div>` : ""}</div>
       <div class="btn-row no-print">${isAdmin() ? `<button class="btn secondary" id="edit">Edit</button>` : ""}<button class="btn secondary" id="report">Report card</button></div></div>
     <div class="stats">
       <div class="stat"><div class="label">Attendance</div><div class="value">${p.attendance.rate === null ? "–" : p.attendance.rate + "%"}</div><div class="sub">${p.attendance.counts.P} present · ${p.attendance.counts.A} absent · ${p.attendance.counts.L} late</div></div>

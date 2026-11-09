@@ -1,4 +1,4 @@
-import { state, api, esc, appInviteLine, studentName, className, toast, emptyState, modal, onSubmit, confirmBox, waChat, download, toCSV } from "../core.js";
+import { state, api, esc, appInviteLine, studentName, className, toast, emptyState, modal, onSubmit, confirmBox, waChat, download, toCSV, makeSortable } from "../core.js";
 
 const ROLE_LABEL = { admin: "Admin / office", teacher: "Teacher", assistant: "Assistant teacher", parent: "Parent" };
 
@@ -34,6 +34,7 @@ export async function render(page, [tab = "staff"]) {
     </tbody></table></div>` : emptyState(tab === "parents" ? "No parent logins yet. Use “Create logins for all families” to make one per family phone number." : "No staff yet.")}
     ${tab === "staff" ? `<p class="muted small">To assign a teacher or assistant teacher to a grade, go to <a href="#/classes">Grades & WhatsApp</a> → Edit.</p>` : ""}</div>`;
 
+  makeSortable(page.querySelector(".card table"));
   page.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { location.hash = `#/users/${b.dataset.t}`; });
   page.querySelector("#add").onclick = () => userForm({ role: tab === "parents" ? "parent" : "teacher" });
   page.querySelectorAll("[data-edit]").forEach((b) => b.onclick = () => userForm(users.find((u) => u.id === b.dataset.edit)));
