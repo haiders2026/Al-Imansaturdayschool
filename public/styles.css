@@ -221,3 +221,9 @@ tfoot td { background: #fafbfa; border-top: 1px solid var(--line); }
 .dash-picture-frame img { display: block; width: 100%; height: auto; border-radius: 8px; }
 .dash-picture-caption { margin: 10px 4px 0; font-weight: 600; }
 .dash-picture-tools { margin-top: 10px; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--green); }
+th.sortable::after { content: " ↕"; opacity: .35; font-size: .85em; }
+th[aria-sort=ascending]::after { content: " ▲"; opacity: .8; }
+th[aria-sort=descending]::after { content: " ▼"; opacity: .8; }
+@media print { th.sortable::after { content: ""; } }

@@ -1,10 +1,20 @@
-import { state, api, esc, studentName, className, classOptions, isAdmin, toast, emptyState, modal, onSubmit, download, toCSV, waChat, parentPhone, parentName, loadCommon, waShare } from "../core.js";
+import { state, api, esc, fmtDate, studentName, className, classOptions, isAdmin, toast, emptyState, modal, onSubmit, download, toCSV, waChat, parentPhone, parentName, loadCommon, waShare, makeSortable } from "../core.js";
+
+const VIA = { manual: "Added", registration: "Online registration, added", import: "Imported from a spreadsheet", starter: "Loaded from the starter data" };
+// Who created the record and when (admins only; older records only have a date).
+export function addedText(s, { short = false } = {}) {
+  const a = s.added;
+  if (!a) return s.createdAt ? (short ? `Not recorded · ${fmtDate(s.createdAt)}` : `Added on ${fmtDate(s.createdAt)} (who added it wasn't recorded then)`) : "";
+  if (short) return `${a.by || "Unknown"}${a.via === "registration" ? " (online)" : a.via === "import" || a.via === "starter" ? " (import)" : ""} · ${fmtDate(a.at)}`;
+  return `${VIA[a.via] || "Added"} by ${a.by || "unknown"} on ${fmtDate(a.at)}${a.ref ? ` · registration ${a.ref}` : ""}`;
+}
 
 export async function render(page) {
   const params = new URLSearchParams(location.hash.split("?")[1] || "");
   let q = params.get("q") || "";
   let cls = params.get("class") || "";
   let showInactive = false, code = "";
+  const sort = {};
 
   page.innerHTML = `
     <div class="page-head"><div><h1>Students</h1><div class="muted" id="count"></div></div>
@@ -29,12 +39,13 @@ export async function render(page) {
   const draw = () => {
     const list = filtered();
     page.querySelector("#count").textContent = `${list.length} student${list.length === 1 ? "" : "s"}`;
-    page.querySelector("#table").innerHTML = list.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th>${isAdmin() ? "<th>Code</th>" : ""}<th>Class</th><th>Parent / guardian</th><th>Phone</th><th></th></tr></thead><tbody>
+    page.querySelector("#table").innerHTML = list.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th>${isAdmin() ? "<th>Code</th>" : ""}<th>Class</th><th>Parent / guardian</th><th>Phone</th>${isAdmin() ? "<th>Added by</th>" : ""}<th></th></tr></thead><tbody>
       ${list.map((s) => `<tr class="clickable" data-id="${s.id}"><td><strong>${esc(studentName(s))}</strong> ${s.active === false ? `<span class="badge red">Withdrawn</span>` : ""}</td>${isAdmin() ? `<td><span class="badge ${s.code === "R" ? "blue" : ""}">${s.code === "R" ? "R" : "C"}</span></td>` : ""}
         <td>${esc(className(s.classId))}</td><td>${esc([s.fatherName, s.motherName].filter(Boolean).join(" / ") || s.guardianName || "")}</td>
-        <td>${esc(parentPhone(s))}</td>
+        <td>${esc(parentPhone(s))}</td>${isAdmin() ? `<td class="small muted" data-sort="${esc(s.added?.by || "")}">${esc(addedText(s, { short: true }))}</td>` : ""}
         <td>${parentPhone(s) ? `<a class="btn sm wa" href="${waChat(parentPhone(s))}" target="_blank" rel="noopener" onclick="event.stopPropagation()">WhatsApp</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div>` : emptyState(state.students.length ? "No students match." : "No students yet. Import your sheet from Settings & Import.");
+    makeSortable(page.querySelector("#table table"), sort);
     page.querySelectorAll("tr[data-id]").forEach((r) => r.onclick = () => { location.hash = `#/student/${r.dataset.id}`; });
   };
   draw();
