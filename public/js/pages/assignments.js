@@ -33,10 +33,11 @@ export async function render(page, [classIdParam]) {
 function item(a, now) {
   const overdue = a.dueDate && a.dueDate < now;
   const canEdit = isAdmin() || a.createdById === state.user.id || (isStaff() && state.classes.some((c) => c.id === a.classId));
-  const shareText = `📚 *New assignment – ${className(a.classId)}*\n${a.title}${a.dueDate ? `\nDue: ${fmtDate(a.dueDate)}` : ""}${a.description ? `\n\n${a.description}` : ""}${a.link ? `\n${a.link}` : ""}\n\nDownload it in the school app: ${location.origin}/#/assignments/${a.classId}`;
+  const shareText = `📚 *New assignment – ${className(a.classId)}*\n${a.title}${a.classDate ? `\nFor the class of ${fmtDate(a.classDate)}` : ""}${a.dueDate ? `\nDue: ${fmtDate(a.dueDate)}` : ""}${a.description ? `\n\n${a.description}` : ""}${a.link ? `\n${a.link}` : ""}\n\nDownload it in the school app: ${location.origin}/#/assignments/${a.classId}`;
   return `<div class="list-item">
     <div class="btn-row" style="justify-content:space-between;align-items:flex-start">
       <div><strong>${esc(a.title)}</strong> <span class="badge">${esc(className(a.classId))}</span> ${a.subject ? `<span class="badge blue">${esc(a.subject)}</span>` : ""}
+        ${a.classDate ? `<span class="badge green">Class of ${fmtDate(a.classDate)}</span>` : ""}
         ${a.dueDate ? `<span class="badge ${overdue ? "" : "amber"}">Due ${fmtDate(a.dueDate)}</span>` : ""}</div>
       <div class="btn-row">
         ${a.file ? `<button class="btn sm" data-file="${a.id}">⬇ ${esc(a.file.name)}</button>` : ""}
@@ -45,7 +46,7 @@ function item(a, now) {
         ${canEdit && isStaff() ? `<button class="btn sm secondary" data-edit="${a.id}">Edit</button><button class="btn sm danger" data-del="${a.id}">Delete</button>` : ""}
       </div></div>
     ${a.description ? `<div class="note-text" style="margin-top:6px">${esc(a.description)}</div>` : ""}
-    <div class="meta">Posted by ${esc(a.createdBy || "")} · ${fmtDate(a.createdAt)}</div></div>`;
+    <div class="meta">Uploaded by ${esc(a.createdBy || "")} on ${fmtDate(a.createdAt)}${a.classDate && a.classDate < a.createdAt.slice(0, 10) ? " (after the class)" : ""}</div></div>`;
 }
 
 function form(classId, a = {}) {
@@ -54,7 +55,8 @@ function form(classId, a = {}) {
     body: `<form><div class="form-grid">
       <div class="field"><label>Class</label><select name="classId" required>${classOptions(a.classId || classId)}</select></div>
       <div class="field"><label>Subject</label><input name="subject" value="${esc(a.subject || "")}"></div>
-      <div class="field"><label>Due date</label><input type="date" name="dueDate" value="${a.dueDate || ""}" min="${a.id ? "" : today()}"></div></div>
+      <div class="field"><label>Class date (can be a past class)</label><input type="date" name="classDate" value="${a.classDate || (a.id ? "" : today())}"></div>
+      <div class="field"><label>Due date (optional)</label><input type="date" name="dueDate" value="${a.dueDate || ""}"></div></div>
       <div class="field"><label>Title</label><input name="title" value="${esc(a.title || "")}" required></div>
       <div class="field"><label>Instructions</label><textarea name="description">${esc(a.description || "")}</textarea></div>
       <div class="field"><label>Attach a file (PDF, Word, image… up to ${MAX_MB} MB)${a.file ? ` — current: ${esc(a.file.name)}` : ""}</label><input type="file" name="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,image/*,audio/*"></div>

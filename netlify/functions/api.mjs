@@ -581,13 +581,17 @@ route("GET", "/assignments", async ({ user, url }) => {
     const allowed = (await visibleClasses(user)).map((c) => c.id);
     list = list.filter((a) => allowed.includes(a.classId));
   }
-  return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // Newest class first; assignments from before classDate existed fall back to their upload date.
+  const day = (a) => a.classDate || a.createdAt.slice(0, 10);
+  return list.sort((a, b) => day(b).localeCompare(day(a)) || b.createdAt.localeCompare(a.createdAt));
 });
 route("POST", "/assignments", async ({ user, body }) => {
   await assertClassAccess(user, body.classId, { write: true });
   if (body.id) await assertClassAccess(user, (await findById("assignments", body.id))?.classId, { write: true });
   if (!body.title) fail(400, "Title is required.");
-  const record = { ...pick(body, ["id", "classId", "title", "description", "dueDate", "subject", "link"]) };
+  const record = { ...pick(body, ["id", "classId", "title", "description", "dueDate", "subject", "link", "classDate"]) };
+  // Teachers can post work for a class that already happened; the upload date is kept separately (createdAt).
+  for (const k of ["classDate", "dueDate"]) if (record[k] && !/^\d{4}-\d{2}-\d{2}$/.test(record[k])) fail(400, "Please enter a valid date.");
   if (!body.id) { record.createdBy = user.name; record.createdById = user.id; }
   record.id = body.id || newId();
   if (body.file?.data) record.file = await saveUpload(record.id, body.file);

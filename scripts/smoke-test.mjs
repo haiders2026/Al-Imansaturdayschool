@@ -82,6 +82,12 @@ await call("PUT", `/tests/${test.id}/scores`, { scores: { [kids[0].id]: { score:
 await call("PUT", `/tests/${test.id}/scores`, { scores: { [kids[0].id]: { score: 18, comment: "Great" }, [kids[1].id]: { score: 9 } } });
 const a = await call("POST", "/assignments", { classId: cls.id, title: "Worksheet", file: { name: "w.pdf", type: "application/pdf", data: Buffer.from("%PDF-1.4 hello").toString("base64") } });
 ok(a.file.size === 14, "assignment file uploaded");
+const late = await call("POST", "/assignments", { classId: cls.id, title: "Last week's homework", classDate: "2026-09-12", dueDate: "2026-09-19" });
+ok(late.classDate === "2026-09-12" && late.createdAt.slice(0, 10) > late.classDate, "a teacher can post an assignment for a past class; the upload date is kept");
+await call("POST", "/assignments", { classId: cls.id, title: "Bad", classDate: "next week" }, 400);
+const listed = await call("GET", `/assignments?classId=${cls.id}`);
+ok(listed.indexOf(listed.find((x) => x.id === late.id)) > listed.indexOf(listed.find((x) => x.id === a.id)), "assignments are listed newest class first");
+await call("DELETE", `/assignments/${late.id}`);
 const file = await call("GET", `/assignments/${a.id}/file`);
 ok(file.startsWith("%PDF"), "assignment file downloads");
 await call("POST", "/notes", { studentId: kids[0].id, text: "Private note", category: "Behaviour" });
