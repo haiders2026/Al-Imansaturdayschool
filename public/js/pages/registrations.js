@@ -1,4 +1,4 @@
-import { state, api, esc, appInviteLine, fmtDate, toast, emptyState, modal, confirmBox, loadCommon, waChat, studentName, onSubmit } from "../core.js";
+import { state, api, esc, appInviteLine, fmtDate, toast, emptyState, modal, confirmBox, loadCommon, waChat, studentName, className, classOptions, onSubmit } from "../core.js";
 
 const STATUS = { pending: ["New", "amber"], approved: ["Added", "green"], declined: ["Declined", "red"] };
 const regLink = () => `${location.origin}/register`;
@@ -6,7 +6,7 @@ const parents = (f) => [f.fatherName, f.motherName, f.guardianName].filter(Boole
 const phoneOf = (f) => f.fatherPhone || f.motherPhone || f.guardianPhone || "";
 
 export async function render(page, [filter = "pending"]) {
-  const regs = await api("GET", "/registrations");
+  const [regs, families] = await Promise.all([api("GET", "/registrations"), filter === "families" ? api("GET", "/registrations/families") : null]);
   const s = state.settings;
   const counts = Object.fromEntries(Object.keys(STATUS).map((k) => [k, regs.filter((r) => r.status === k).length]));
 
@@ -23,7 +23,7 @@ export async function render(page, [filter = "pending"]) {
         <div class="field" style="margin-top:10px"><label>Message at the top of the form (fees, dates, what to bring…)</label>
           <textarea name="registrationNote" rows="3" placeholder="e.g. Classes start Saturday 12 September. The yearly fee is $150 per child plus $25 per book.">${esc(s.registrationNote || "")}</textarea></div>
         <button class="btn sm" type="submit">Save</button></form></div>
-    <div class="tabs">${Object.entries(STATUS).map(([k, [l]]) => `<button data-f="${k}" class="${k === filter ? "active" : ""}">${l} (${counts[k]})</button>`).join("")}</div>
+    <div class="tabs">${Object.entries(STATUS).map(([k, [l]]) => `<button data-f="${k}" class="${k === filter ? "active" : ""}">${l} (${counts[k]})</button>`).join("")}<button data-f="families" class="${filter === "families" ? "active" : ""}">Enrolled families</button></div>
     <div id="list"></div>`;
 
   page.querySelectorAll("[data-f]").forEach((b) => b.onclick = () => { location.hash = `#/registrations/${b.dataset.f}`; });
@@ -36,6 +36,7 @@ export async function render(page, [filter = "pending"]) {
     toast(v.registrationOpen ? "Saved. Registration is open." : "Saved. Registration is closed.");
   });
 
+  if (families) return drawFamilies(page.querySelector("#list"), families);
   const list = regs.filter((r) => r.status === filter);
   page.querySelector("#list").innerHTML = list.length ? `<div class="table-wrap"><table><thead><tr><th>Received</th><th>Children</th><th>Parents</th><th>Phone</th><th>Status</th></tr></thead><tbody>
     ${list.map((r) => `<tr class="clickable" data-id="${r.id}"><td>${fmtDate(r.createdAt)}</td>
@@ -143,5 +144,53 @@ function showLogins(logins, r) {
           <div class="btn-row" style="margin-top:8px"><a class="btn wa sm" target="_blank" rel="noopener" href="${esc(waChat(l.username, msg) || waChat(phoneOf(r.family), msg))}">Send on WhatsApp</a></div></div>`;
       }).join("")}
       <div class="modal-foot"><button class="btn" data-close>Done</button></div>`,
+  });
+}
+
+// Families already enrolled, with their children, so the office can add a brother or sister in one step.
+function drawFamilies(box, families) {
+  let q = "";
+  const parentsOf = (f) => [f.fatherName, f.motherName, f.guardianName].filter(Boolean).join(" & ") || "No parent name";
+  const phoneOfFam = (f) => f.fatherPhone || f.motherPhone || f.guardianPhone || "";
+  const sorted = families.sort((a, b) => parentsOf(a).localeCompare(parentsOf(b)));
+  box.innerHTML = `<div class="card"><div class="toolbar"><div class="field" style="flex:1"><label>Search</label><input id="fq" placeholder="Parent, child or phone"></div></div>
+    <p class="muted small">Every family with a child at the school, grouped by parent phone. Use <strong>Add sibling</strong> to enrol a brother or sister: the parents' details are copied and the child appears on the family's login.</p><div id="ft"></div></div>`;
+  const draw = () => {
+    const l = sorted.filter((f) => !q || [parentsOf(f), phoneOfFam(f), ...f.children.map((c) => `${c.firstName} ${c.lastName}`)].join(" ").toLowerCase().includes(q));
+    box.querySelector("#ft").innerHTML = l.length ? `<div class="table-wrap"><table><thead><tr><th>Family</th><th>Phone</th><th>Children</th><th>Parent login</th><th></th></tr></thead><tbody>
+      ${l.map((f) => `<tr style="vertical-align:top"><td><strong>${esc(parentsOf(f))}</strong></td><td>${esc(phoneOfFam(f))}</td>
+        <td>${f.children.map((c) => `<a href="#/student/${c.id}">${esc(c.firstName)} ${esc(c.lastName || "")}</a> <span class="muted small">${esc(className(c.classId))}</span>`).join("<br>")}</td>
+        <td>${f.login ? `<span class="badge green">${esc(f.login)}</span>` : `<span class="muted small">None yet</span>`}</td>
+        <td><button class="btn sm" data-sib="${esc(f.key)}">+ Add sibling</button></td></tr>`).join("")}
+      </tbody></table></div>` : emptyState(families.length ? "No family matches." : "No students yet.");
+    box.querySelectorAll("[data-sib]").forEach((b) => b.onclick = () => siblingForm(families.find((f) => f.key === b.dataset.sib), parentsOf));
+  };
+  draw();
+  box.querySelector("#fq").oninput = (e) => { q = e.target.value.toLowerCase(); draw(); };
+}
+
+function siblingForm(f, parentsOf) {
+  const lastName = f.children[0]?.lastName || "";
+  const { el, close } = modal({
+    title: `Add a sibling — ${parentsOf(f)}`,
+    body: `<p class="muted small">Already at the school: ${f.children.map((c) => esc(c.firstName)).join(", ")}. Parent names, phones, address and emergency contact are copied from them.</p>
+      <form><div class="form-grid">
+        <div class="field"><label>First name</label><input name="firstName" required></div>
+        <div class="field"><label>Last name</label><input name="lastName" value="${esc(lastName)}"></div>
+        <div class="field"><label>Class</label><select name="classId" required><option value="">Pick a class…</option>${classOptions("")}</select></div>
+        <div class="field"><label>Books</label><select name="books">${[0, 1, 2, 3].map((n) => `<option ${n === 1 ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <div class="field"><label>Gender</label><select name="gender"><option value=""></option><option>Male</option><option>Female</option></select></div>
+        <div class="field"><label>Date of birth</label><input type="date" name="dob"></div>
+        <div class="field"><label>Allergies</label><input name="allergies"></div>
+        <div class="field"><label>Medical notes</label><input name="medical"></div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn secondary" data-close>Cancel</button><button class="btn" type="submit">Add to students</button></div></form>`,
+  });
+  onSubmit(el.querySelector("form"), async (v) => {
+    const res = await api("POST", "/registrations/families/sibling", { ...v, books: Number(v.books), siblingOf: f.children[0].id });
+    await loadCommon();
+    close();
+    toast(`${res.student.firstName} added${res.logins.length ? ` and linked to the family login (${res.logins.join(", ")})` : ""}`);
+    window.refreshPage();
   });
 }

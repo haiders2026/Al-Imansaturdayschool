@@ -1,6 +1,6 @@
 import { state, api, esc, fmtDate, studentName, className, classOptions, isAdmin, toast, emptyState, modal, onSubmit, download, toCSV, waChat, parentPhone, parentName, loadCommon, waShare, makeSortable } from "../core.js";
 
-const VIA = { manual: "Added", registration: "Online registration, added", import: "Imported from a spreadsheet", starter: "Loaded from the starter data" };
+const VIA = { manual: "Added", registration: "Online registration, added", import: "Imported from a spreadsheet", starter: "Loaded from the starter data", sibling: "Added as a sibling" };
 // Who created the record and when (admins only; older records only have a date).
 export function addedText(s, { short = false } = {}) {
   const a = s.added;

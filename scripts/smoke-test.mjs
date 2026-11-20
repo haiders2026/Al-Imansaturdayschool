@@ -209,6 +209,17 @@ ok(back.children[0].matchId === returning.id, "a returning child is matched to t
 const before = (await call("GET", "/students")).length;
 await call("POST", `/registrations/${back.id}/approve`, { children: [{ classId: cls.id }] });
 ok((await call("GET", "/students")).length === before, "approving a returning child updates them instead of duplicating");
+{
+  const fams = await call("GET", "/registrations/families");
+  const fam = fams.find((f) => f.children.some((c) => c.id === zaid.id));
+  ok(fam && fam.children.length === 2 && fam.login === "7185550199", "enrolled families list shows each family's children and login");
+  await call("POST", "/registrations/families/sibling", { siblingOf: zaid.id, firstName: "Huda", classId: "" }, 400);
+  await call("POST", "/registrations/families/sibling", { siblingOf: zaid.id, firstName: zaid.firstName, classId: cls.id }, 400);
+  const sib = await call("POST", "/registrations/families/sibling", { siblingOf: zaid.id, firstName: "Ibrahim", gender: "Male", classId: cls.id, books: 2 });
+  ok(sib.student.lastName === zaid.lastName && sib.student.fatherPhone === zaid.fatherPhone && sib.student.books === 2 && sib.student.added.via === "sibling", "a sibling gets the family's details and records who added them");
+  ok(sib.logins.includes("7185550199") && (await call("GET", "/users")).find((u) => u.username === "7185550199").studentIds.includes(sib.student.id), "the new sibling is linked to the family's parent login");
+  await call("DELETE", `/students/${sib.student.id}`);
+}
 await call("PUT", "/settings", { registrationOpen: false });
 token = "";
 ok((await call("GET", "/register/info")).open === false, "admin can close registration");

@@ -924,6 +924,49 @@ route("POST", "/registrations/:id/approve", async ({ user, params, body }) => {
   await upsert("registrations", { ...reg, status: "approved", studentIds, reviewedBy: user.name, reviewedAt: new Date().toISOString() });
   return { studentIds, logins };
 });
+// Families already at the school (siblings share a parent phone), so the office can add a brother or sister
+// without the family filling in the registration form again.
+const familyKeyOf = (s) => digits(s.fatherPhone || s.motherPhone || s.guardianPhone) || `name:${(s.lastName || s.firstName || "").toLowerCase()}`;
+route("GET", "/registrations/families", async ({ user }) => {
+  requireRole(user, "admin");
+  const [students, users] = await Promise.all([all("students"), all("users")]);
+  const fams = new Map();
+  for (const s of students.filter((x) => x.active !== false)) {
+    const k = familyKeyOf(s);
+    if (!fams.has(k)) fams.set(k, { key: k, ...pick(s, ["fatherName", "fatherPhone", "motherName", "motherPhone", "guardianName", "guardianPhone"]), children: [] });
+    fams.get(k).children.push(pick(s, ["id", "firstName", "lastName", "classId"]));
+  }
+  return [...fams.values()].map((f) => {
+    const ids = f.children.map((c) => c.id);
+    const login = users.find((u) => u.role === "parent" && u.active !== false && (u.studentIds || []).some((id) => ids.includes(id)));
+    return { ...f, login: login ? login.username : "" };
+  });
+});
+route("POST", "/registrations/families/sibling", async ({ user, body }) => {
+  requireRole(user, "admin");
+  const students = await all("students");
+  const sib = students.find((s) => s.id === body.siblingOf);
+  if (!sib) fail(404, "Family not found.");
+  const child = clip(body, ["firstName", "lastName", "gender", "dob", "medical", "allergies"]);
+  if (!child.firstName) fail(400, "Enter the child's first name.");
+  child.lastName = child.lastName || sib.lastName || "";
+  if (!(await all("classes")).some((c) => c.id === body.classId)) fail(400, "Pick a class.");
+  const key = familyKeyOf(sib);
+  const same = (a, b) => (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
+  if (students.some((s) => familyKeyOf(s) === key && same(s.firstName, child.firstName) && same(s.lastName, child.lastName))) fail(400, `${child.firstName} is already in this family.`);
+  const saved = await upsert("students", cleanFeeFields({
+    ...pick(sib, [...REG_FAMILY_FIELDS.filter((k) => k !== "comments"), "photoConsent"]),
+    ...child, classId: body.classId, books: body.books ?? 1, active: true,
+    enrolledOn: new Date().toISOString().slice(0, 10),
+    added: addedInfo(user, "sibling", { siblingOf: sib.id }),
+  }));
+  // The family's parent login sees the new child straight away.
+  const users = await all("users");
+  const linked = users.filter((u) => u.role === "parent" && (u.studentIds || []).includes(sib.id));
+  linked.forEach((u) => { u.studentIds = [...new Set([...(u.studentIds || []), saved.id])]; });
+  if (linked.length) await saveAll("users", users);
+  return { student: saved, logins: linked.map((u) => u.username) };
+});
 route("POST", "/registrations/:id/status", async ({ user, params, body }) => {
   requireRole(user, "admin");
   const reg = await findById("registrations", params.id);
