@@ -1,6 +1,6 @@
-import { state, api, esc, fmtDate, classOptions, className, isAdmin, toast, emptyState, modal, onSubmit, confirmBox, fileToBase64, downloadAuthed } from "../core.js";
+import { state, api, esc, fmtDate, classOptions, className, isAdmin, toast, emptyState, modal, onSubmit, confirmBox, prepareUpload, MAX_UPLOAD_MB, downloadAuthed } from "../core.js";
 
-const MAX_MB = 4;
+const MAX_MB = MAX_UPLOAD_MB;
 const STATUS = {
   draft: ["Draft", ""],
   submitted: ["Waiting for review", "amber"],
@@ -109,8 +109,10 @@ function form(p = {}) {
     const body = { ...v, id: p.id, status };
     delete body.file;
     if (file) {
-      if (file.size > MAX_MB * 1024 * 1024) throw new Error(`That file is too big. Please keep it under ${MAX_MB} MB.`);
-      body.file = { name: file.name, type: file.type, data: await fileToBase64(file) };
+      const btn = formEl.querySelector("[type=submit]");
+      const label = btn.textContent;
+      try { body.file = await prepareUpload(file, { onProgress: (x) => { btn.textContent = `Uploading… ${Math.round(x * 100)}%`; } }); }
+      finally { btn.textContent = label; }
     }
     await api("POST", "/lessonplans", body);
     toast(status === "draft" ? "Draft saved" : isAdmin() ? "Saved" : "Sent to the admin for review");
