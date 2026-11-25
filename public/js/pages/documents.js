@@ -1,6 +1,6 @@
-import { state, api, esc, fmtDate, isAdmin, isStaff, can, className, classOptions, toast, emptyState, modal, onSubmit, confirmBox, fileToBase64, downloadAuthed, openAuthed, waShare } from "../core.js";
+import { state, api, esc, fmtDate, isAdmin, isStaff, can, className, classOptions, toast, emptyState, modal, onSubmit, confirmBox, prepareUpload, MAX_UPLOAD_MB, downloadAuthed, openAuthed, waShare } from "../core.js";
 
-const MAX_MB = 4;
+const MAX_MB = MAX_UPLOAD_MB;
 const CATEGORIES = ["Forms", "Policies", "Newsletters", "Curriculum & syllabus", "Timetables", "Other"];
 const AUDIENCE = { all: "Everyone (staff and parents)", staff: "Teachers and staff only", admin: "Admins only", class: "One grade (its teachers and parents)" };
 const audienceLabel = (d) => (d.audience === "class" ? className(d.classId) : { all: "Everyone", staff: "Staff only", admin: "Admins only" }[d.audience]);
@@ -77,8 +77,10 @@ function form(d = {}) {
     const body = { ...v, id: d.id };
     delete body.file;
     if (file) {
-      if (file.size > MAX_MB * 1024 * 1024) throw new Error(`That file is too big. Please keep it under ${MAX_MB} MB.`);
-      body.file = { name: file.name, type: file.type, data: await fileToBase64(file) };
+      const btn = f.querySelector("[type=submit]");
+      const label = btn.textContent;
+      try { body.file = await prepareUpload(file, { onProgress: (x) => { btn.textContent = `Uploading… ${Math.round(x * 100)}%`; } }); }
+      finally { btn.textContent = label; }
     }
     await api("POST", "/documents", body);
     toast(d.id ? "Saved" : "Uploaded");

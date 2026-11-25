@@ -2,7 +2,11 @@
 import { db, all, saveAll, findById, upsert, remove, newId } from "./lib/store.mjs";
 import { hashPassword, checkPassword, signToken, verifyToken, randomPassword, safeEqual } from "./lib/auth.mjs";
 
-const MAX_FILE_BYTES = 4 * 1024 * 1024;
+// Netlify caps each request and response at about 6 MB, so files over PART_BYTES travel in pieces:
+// the browser uploads them with POST /uploads/part and downloads them with ?part=N.
+const MAX_FILE_BYTES = 16 * 1024 * 1024;
+const PART_BYTES = 3 * 1024 * 1024;
+const MAX_PARTS = Math.ceil(MAX_FILE_BYTES / PART_BYTES);
 const STATUSES = ["P", "A", "L", "E"]; // present, absent, late, excused
 
 class HttpError extends Error {
@@ -193,20 +197,46 @@ function attendanceSummary(records, studentId) {
   return { counts, total, rate, history };
 }
 
-// Files arrive as base64 inside JSON and are kept under "file:<id>".
-async function saveUpload(id, file) {
-  const buf = Buffer.from(file.data, "base64");
-  if (buf.length > MAX_FILE_BYTES) fail(400, "Files must be 4 MB or smaller.");
+// Files arrive as base64 inside JSON (small ones) or as pieces sent beforehand (file.uploadId), and are
+// kept under "file:<id>". Pieces belong to the person who sent them and are removed once joined.
+const hasFile = (file) => !!(file?.data || file?.uploadId);
+async function saveUpload(id, file, user, { maxBytes = MAX_FILE_BYTES } = {}) {
+  let buf;
+  if (file.uploadId) {
+    const parts = Number(file.parts);
+    if (!/^[a-z0-9]+$/.test(file.uploadId) || !Number.isInteger(parts) || parts < 1 || parts > MAX_PARTS) fail(400, "That upload didn't finish. Please try again.");
+    const store = await db();
+    const pieces = [];
+    for (let i = 0; i < parts; i++) {
+      const piece = await store.getFile(`upload:${file.uploadId}:${i}`);
+      if (!piece || piece.metadata?.by !== user.id) fail(400, "That upload didn't finish. Please try again.");
+      pieces.push(piece.data);
+    }
+    buf = Buffer.concat(pieces);
+    for (let i = 0; i < parts; i++) await store.del(`upload:${file.uploadId}:${i}`);
+  } else buf = Buffer.from(file.data, "base64");
+  if (buf.length > maxBytes) fail(400, `Files must be ${Math.round(maxBytes / 1024 / 1024)} MB or smaller.`);
   const name = String(file.name || "file").replace(/[^\w.\- ()]/g, "_").slice(0, 120);
   const type = file.type || "application/octet-stream";
   await (await db()).setFile(`file:${id}`, buf, { name, type });
   return { name, type, size: buf.length };
 }
 
-async function sendFile(id, { inline = false } = {}) {
+// With ?part=N, sends one piece and says in x-file-parts how many there are, so large files can be
+// downloaded in pieces that fit under Netlify's response limit.
+async function sendFile(id, { inline = false, url } = {}) {
   const f = await (await db()).getFile(`file:${id}`);
   if (!f) fail(404, "File not found.");
-  return new Response(f.data, { headers: {
+  const part = url?.searchParams.get("part");
+  const parts = Math.max(1, Math.ceil(f.data.length / PART_BYTES));
+  let data = f.data;
+  if (part !== null && part !== undefined) {
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 0 || n >= parts) fail(400, "No such part.");
+    data = f.data.subarray(n * PART_BYTES, (n + 1) * PART_BYTES);
+  }
+  return new Response(data, { headers: {
+    "x-file-parts": String(parts),
     "content-type": f.metadata?.type || "application/octet-stream",
     "content-disposition": `${inline ? "inline" : "attachment"}; filename="${encodeURIComponent(f.metadata?.name || "file")}"`,
   } });
@@ -224,6 +254,18 @@ const route = (method, pattern, handler, { auth = true } = {}) => {
   const regex = new RegExp("^" + pattern.replace(/:(\w+)/g, (_, k) => (keys.push(k), "([^/]+)")) + "/?$");
   routes.push({ method, regex, keys, handler, auth });
 };
+
+// One piece of a large file, sent before the record that uses it (see saveUpload).
+route("POST", "/uploads/part", async ({ user, body }) => {
+  if (user.role === "parent") fail(403, "Parents can't upload files.");
+  const index = Number(body.index);
+  if (!Number.isInteger(index) || index < 0 || index >= MAX_PARTS) fail(400, `Files must be ${MAX_FILE_BYTES / 1024 / 1024} MB or smaller.`);
+  const uploadId = body.uploadId && /^[a-z0-9]+$/.test(body.uploadId) ? body.uploadId : newId();
+  const buf = Buffer.from(String(body.data || ""), "base64");
+  if (!buf.length || buf.length > PART_BYTES) fail(400, "That piece of the file is the wrong size.");
+  await (await db()).setFile(`upload:${uploadId}:${index}`, buf, { by: user.id, at: new Date().toISOString() });
+  return { uploadId };
+});
 
 // Setup & auth
 route("GET", "/setup", async () => {
@@ -598,7 +640,7 @@ route("POST", "/assignments", async ({ user, body }) => {
   for (const k of ["classDate", "dueDate"]) if (record[k] && !/^\d{4}-\d{2}-\d{2}$/.test(record[k])) fail(400, "Please enter a valid date.");
   if (!body.id) { record.createdBy = user.name; record.createdById = user.id; }
   record.id = body.id || newId();
-  if (body.file?.data) record.file = await saveUpload(record.id, body.file);
+  if (hasFile(body.file)) record.file = await saveUpload(record.id, body.file, user);
   return upsert("assignments", record);
 });
 route("DELETE", "/assignments/:id", async ({ user, params }) => {
@@ -609,11 +651,11 @@ route("DELETE", "/assignments/:id", async ({ user, params }) => {
   await (await db()).del(`file:${a.id}`);
   return { ok: true };
 });
-route("GET", "/assignments/:id/file", async ({ user, params }) => {
+route("GET", "/assignments/:id/file", async ({ user, params, url }) => {
   const a = await findById("assignments", params.id);
   if (!a || !a.file) fail(404, "File not found.");
   await assertClassAccess(user, a.classId);
-  return sendFile(a.id);
+  return sendFile(a.id, { url });
 });
 
 // Lesson plans: teachers write them for their grade; the admin reviews them. Parents never see them.
@@ -638,7 +680,7 @@ route("POST", "/lessonplans", async ({ user, body }) => {
   // An admin tidying up an approved plan shouldn't send it back for review.
   if (user.role === "admin" && existing && record.status === "submitted" && existing.status !== "draft") record.status = existing.status;
   if (!existing) { record.authorId = user.id; record.authorName = user.name; }
-  if (body.file?.data) record.file = await saveUpload(`plan:${record.id}`, body.file);
+  if (hasFile(body.file)) record.file = await saveUpload(`plan:${record.id}`, body.file, user);
   return upsert("lessonplans", record);
 });
 route("POST", "/lessonplans/:id/review", async ({ user, params, body }) => {
@@ -656,12 +698,12 @@ route("DELETE", "/lessonplans/:id", async ({ user, params }) => {
   await (await db()).del(`file:plan:${plan.id}`);
   return { ok: true };
 });
-route("GET", "/lessonplans/:id/file", async ({ user, params }) => {
+route("GET", "/lessonplans/:id/file", async ({ user, params, url }) => {
   requireRole(user, "admin", "teacher");
   const plan = await findById("lessonplans", params.id);
   if (!plan || !plan.file) fail(404, "File not found.");
   await assertClassAccess(user, plan.classId, { write: true });
-  return sendFile(`plan:${plan.id}`);
+  return sendFile(`plan:${plan.id}`, { url });
 });
 
 // Teacher notes on students
@@ -998,10 +1040,10 @@ route("POST", "/documents", async ({ user, body }) => {
   const audience = DOC_AUDIENCES.includes(body.audience) ? body.audience : "all";
   if (audience === "class") await assertClassAccess(user, body.classId, { write: true });
   else if (user.role !== "admin") fail(403, "Teachers can share documents with their own grade only.");
-  if (!existing && !body.file?.data) fail(400, "Choose a file to upload.");
+  if (!existing && !hasFile(body.file)) fail(400, "Choose a file to upload.");
   const record = { ...pick(body, ["id", "title", "category", "description"]), audience, classId: audience === "class" ? body.classId : "" };
   if (!existing) { record.id = newId(); record.uploadedBy = user.name; record.uploadedById = user.id; }
-  if (body.file?.data) record.file = await saveUpload(`doc:${record.id}`, body.file);
+  if (hasFile(body.file)) record.file = await saveUpload(`doc:${record.id}`, body.file, user);
   return upsert("documents", record);
 });
 route("DELETE", "/documents/:id", async ({ user, params }) => {
@@ -1012,10 +1054,10 @@ route("DELETE", "/documents/:id", async ({ user, params }) => {
   await (await db()).del(`file:doc:${d.id}`);
   return { ok: true };
 });
-route("GET", "/documents/:id/file", async ({ user, params }) => {
+route("GET", "/documents/:id/file", async ({ user, params, url }) => {
   const d = (await visibleDocuments(user)).find((x) => x.id === params.id);
   if (!d) fail(404, "Document not found.");
-  return sendFile(`doc:${d.id}`, { inline: true });
+  return sendFile(`doc:${d.id}`, { inline: true, url });
 });
 
 // Messages: admins broadcast to any parents or staff they pick; teachers write to their own class's
@@ -1118,7 +1160,7 @@ route("PUT", "/dashboard/image", async ({ user, body }) => {
   requireRole(user, "admin");
   if (!body.file?.data) fail(400, "Choose a picture to upload.");
   if (!IMAGE_TYPES.includes(body.file.type)) fail(400, "Please upload a .jpg picture (PNG also works).");
-  const file = await saveUpload("dashboard-image", body.file);
+  const file = await saveUpload("dashboard-image", body.file, user, { maxBytes: 4 * 1024 * 1024 });
   const meta = { ...file, caption: String(body.caption || "").slice(0, 200), updatedAt: new Date().toISOString(), updatedBy: user.name };
   await (await db()).setJSON("dashboardImage", meta);
   return meta;

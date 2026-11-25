@@ -1,6 +1,6 @@
-import { state, api, esc, fmtDate, today, classOptions, className, isStaff, isAdmin, toast, emptyState, modal, onSubmit, confirmBox, fileToBase64, downloadAuthed, waShare } from "../core.js";
+import { state, api, esc, fmtDate, today, classOptions, className, isStaff, isAdmin, toast, emptyState, modal, onSubmit, confirmBox, prepareUpload, MAX_UPLOAD_MB, downloadAuthed, waShare } from "../core.js";
 
-const MAX_MB = 4;
+const MAX_MB = MAX_UPLOAD_MB;
 
 export async function render(page, [classIdParam]) {
   const classId = classIdParam || "";
@@ -69,8 +69,10 @@ function form(classId, a = {}) {
     const body = { ...v, id: a.id };
     delete body.file;
     if (file) {
-      if (file.size > MAX_MB * 1024 * 1024) throw new Error(`That file is too big. Please keep it under ${MAX_MB} MB.`);
-      body.file = { name: file.name, type: file.type, data: await fileToBase64(file) };
+      const btn = formEl.querySelector("[type=submit]");
+      const label = btn.textContent;
+      try { body.file = await prepareUpload(file, { onProgress: (x) => { btn.textContent = `Uploading… ${Math.round(x * 100)}%`; } }); }
+      finally { btn.textContent = label; }
     }
     await api("POST", "/assignments", body);
     toast(a.id ? "Saved" : "Assignment posted");

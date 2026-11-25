@@ -90,6 +90,35 @@ ok(listed.indexOf(listed.find((x) => x.id === late.id)) > listed.indexOf(listed.
 await call("DELETE", `/assignments/${late.id}`);
 const file = await call("GET", `/assignments/${a.id}/file`);
 ok(file.startsWith("%PDF"), "assignment file downloads");
+{
+  // A 10 MB file goes up in 3 MB pieces and comes back down in pieces, byte for byte.
+  const PART = 3 * 1024 * 1024;
+  const big = Buffer.alloc(10 * 1024 * 1024 + 123, 0);
+  for (let i = 0; i < big.length; i += 4096) big[i] = (i / 4096) % 251;
+  let uploadId;
+  for (let i = 0; i * PART < big.length; i++) ({ uploadId } = await call("POST", "/uploads/part", { uploadId, index: i, data: big.subarray(i * PART, (i + 1) * PART).toString("base64") }));
+  await call("POST", "/uploads/part", { uploadId, index: 0, data: Buffer.alloc(PART + 1).toString("base64") }, 400);
+  await call("POST", "/uploads/part", { index: 6, data: "AAAA" }, 400);
+  const teacherToken = token;
+  token = adminToken;
+  await call("POST", "/assignments", { classId: cls.id, title: "Someone else's upload", file: { name: "x.pdf", type: "application/pdf", uploadId, parts: 4 } }, 400);
+  token = teacherToken;
+  const bigA = await call("POST", "/assignments", { classId: cls.id, title: "Big worksheet", file: { name: "big.pdf", type: "application/pdf", uploadId, parts: 4 } });
+  ok(bigA.file.size === big.length, "a 10 MB assignment file uploads in pieces");
+  const pieces = [];
+  for (let i = 0; ; i++) {
+    const res = await api(new Request(`http://x/api/assignments/${bigA.id}/file?part=${i}`, { headers: { authorization: `Bearer ${token}` } }));
+    pieces.push(Buffer.from(await res.arrayBuffer()));
+    if (i + 1 >= Number(res.headers.get("x-file-parts"))) break;
+  }
+  ok(pieces.length === 4 && pieces.every((x) => x.length <= PART) && Buffer.concat(pieces).equals(big), "a large file downloads in pieces and matches what was uploaded");
+  ok((await (await db()).list("upload:")).length === 0, "upload pieces are cleaned up once the file is saved");
+  await call("POST", "/assignments", { classId: cls.id, title: "Reused", file: { name: "big.pdf", type: "application/pdf", uploadId, parts: 4 } }, 400);
+  let tooBig;
+  for (let i = 0; i < 6; i++) ({ uploadId: tooBig } = await call("POST", "/uploads/part", { uploadId: tooBig, index: i, data: Buffer.alloc(PART).toString("base64") }));
+  await call("POST", "/assignments", { classId: cls.id, title: "Too big", file: { name: "huge.pdf", type: "application/pdf", uploadId: tooBig, parts: 6 } }, 400);
+  await call("DELETE", `/assignments/${bigA.id}`);
+}
 await call("POST", "/notes", { studentId: kids[0].id, text: "Private note", category: "Behaviour" });
 await call("POST", "/notes", { studentId: kids[0].id, text: "Shared praise", category: "Praise", visibleToParent: true });
 

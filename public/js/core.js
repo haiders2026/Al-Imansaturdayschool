@@ -249,18 +249,54 @@ export function fileToBase64(file) {
   });
 }
 
+// Netlify limits each request to about 6 MB, so files bigger than PART_BYTES are sent and fetched
+// in pieces. Must match PART_BYTES / MAX_FILE_BYTES in the server.
+export const MAX_UPLOAD_MB = 16;
+const PART_BYTES = 3 * 1024 * 1024;
+
+// Turns a chosen file into what the server expects in `file`: small files inline, large ones
+// uploaded piece by piece first. `onProgress(0..1)` is called as pieces go up.
+export async function prepareUpload(file, { maxMB = MAX_UPLOAD_MB, onProgress } = {}) {
+  if (file.size > maxMB * 1024 * 1024) throw new Error(`That file is too big. Please keep it under ${maxMB} MB.`);
+  if (file.size <= PART_BYTES) return { name: file.name, type: file.type, data: await fileToBase64(file) };
+  const parts = Math.ceil(file.size / PART_BYTES);
+  let uploadId;
+  for (let i = 0; i < parts; i++) {
+    onProgress?.(i / parts);
+    const data = await fileToBase64(file.slice(i * PART_BYTES, (i + 1) * PART_BYTES));
+    ({ uploadId } = await api("POST", "/uploads/part", { uploadId, index: i, data }));
+  }
+  onProgress?.(1);
+  return { name: file.name, type: file.type, uploadId, parts };
+}
+
+// Fetches a protected file, piece by piece when it is large, and returns it as one Blob.
+async function fetchFileBlob(path) {
+  const get = (n) => fetch(`/api${path}${path.includes("?") ? "&" : "?"}part=${n}`, { headers: { authorization: `Bearer ${state.token}` } });
+  const first = await get(0);
+  if (!first.ok) return null;
+  const parts = Number(first.headers.get("x-file-parts")) || 1;
+  const type = first.headers.get("content-type") || "";
+  const pieces = [await first.blob()];
+  for (let i = 1; i < parts; i++) {
+    const res = await get(i);
+    if (!res.ok) return null;
+    pieces.push(await res.blob());
+  }
+  return new Blob(pieces, { type });
+}
+
 export async function downloadAuthed(path, filename) {
-  const res = await fetch(`/api${path}`, { headers: { authorization: `Bearer ${state.token}` } });
-  if (!res.ok) { toast("Couldn't download that file.", "error"); return; }
-  download(filename, await res.blob());
+  const blob = await fetchFileBlob(path);
+  if (!blob) { toast("Couldn't download that file.", "error"); return; }
+  download(filename, blob);
 }
 
 // Opens a protected file (e.g. a PDF) in a new tab. The tab is opened first so pop-up blockers allow it.
 export async function openAuthed(path, filename) {
   const tab = window.open("", "_blank");
-  const res = await fetch(`/api${path}`, { headers: { authorization: `Bearer ${state.token}` } });
-  if (!res.ok) { tab?.close(); toast("Couldn't open that file.", "error"); return; }
-  const blob = await res.blob();
+  const blob = await fetchFileBlob(path);
+  if (!blob) { tab?.close(); toast("Couldn't open that file.", "error"); return; }
   if (!tab || !/pdf|image/.test(blob.type)) { tab?.close(); download(filename, blob); return; }
   tab.location.href = URL.createObjectURL(blob);
 }
